@@ -1,6 +1,5 @@
 from database import db
-from datetime import datetime
-import json
+from utils.clock import utc_now
 
 class Task(db.Model):
     __tablename__ = 'tasks'
@@ -12,8 +11,8 @@ class Task(db.Model):
     priority = db.Column(db.Integer, default=3)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     category_id = db.Column(db.Integer, db.ForeignKey('categories.id'), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=utc_now)
+    updated_at = db.Column(db.DateTime, default=utc_now, onupdate=utc_now)
     due_date = db.Column(db.DateTime, nullable=True)
     tags = db.Column(db.String(500), nullable=True)
 
@@ -48,13 +47,6 @@ class Task(db.Model):
         return False
 
     def is_overdue(self):
-        if self.due_date:
-            if self.due_date < datetime.utcnow():
-                if self.status != 'done' and self.status != 'cancelled':
-                    return True
-                else:
-                    return False
-            else:
-                return False
-        else:
+        if not self.due_date or self.due_date >= utc_now():
             return False
+        return self.status not in ("done", "cancelled")

@@ -1,34 +1,43 @@
+from datetime import datetime
+
 from flask import Flask
 from flask_cors import CORS
+
+from config.settings import DATABASE_URI, DEBUG, HOST, PORT, SECRET_KEY
 from database import db
+from middlewares.error_handler import register_error_handler
+from routes.report_routes import report_bp
 from routes.task_routes import task_bp
 from routes.user_routes import user_bp
-from routes.report_routes import report_bp
-import os, sys, json, datetime
 
-app = Flask(__name__)
+def create_app():
+    application = Flask(__name__)
+    application.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URI
+    application.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+    application.config["SECRET_KEY"] = SECRET_KEY
+    CORS(application)
+    db.init_app(application)
+    register_error_handler(application)
+    application.register_blueprint(task_bp)
+    application.register_blueprint(user_bp)
+    application.register_blueprint(report_bp)
 
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///tasks.db'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SECRET_KEY'] = 'super-secret-key-123'
+    @application.route("/health")
+    def health():
+        return {"status": "ok", "timestamp": str(datetime.now())}
 
-CORS(app)
-db.init_app(app)
+    @application.route("/")
+    def index():
+        return {"message": "Task Manager API", "version": "1.0"}
 
-app.register_blueprint(task_bp)
-app.register_blueprint(user_bp)
-app.register_blueprint(report_bp)
+    return application
 
-@app.route('/health')
-def health():
-    return {'status': 'ok', 'timestamp': str(datetime.datetime.now())}
+app = create_app()
 
-@app.route('/')
-def index():
-    return {'message': 'Task Manager API', 'version': '1.0'}
+def init_database():
+    with app.app_context():
+        db.create_all()
 
-with app.app_context():
-    db.create_all()
-
-if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+if __name__ == "__main__":
+    init_database()
+    app.run(debug=DEBUG, host=HOST, port=PORT)
