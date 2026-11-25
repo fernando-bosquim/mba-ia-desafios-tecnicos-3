@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 
 from sqlalchemy.orm import joinedload
@@ -7,18 +8,23 @@ from models.category import Category
 from models.task import Task
 from models.user import User
 from utils.clock import utc_now
-from utils.helpers import VALID_STATUSES
+from utils.helpers import (
+    DEFAULT_PRIORITY,
+    MAX_PRIORITY,
+    MAX_TITLE_LENGTH,
+    MIN_PRIORITY,
+    MIN_TITLE_LENGTH,
+    VALID_STATUSES,
+)
+
+logger = logging.getLogger(__name__)
+
 
 def _names(task):
-    if task.user_id and task.user:
-        user_name = task.user.name
-    else:
-        user_name = None
-    if task.category_id and task.category:
-        category_name = task.category.name
-    else:
-        category_name = None
+    user_name = task.user.name if task.user_id and task.user else None
+    category_name = task.category.name if task.category_id and task.category else None
     return user_name, category_name
+
 
 def list_tasks():
     tasks = Task.query.options(joinedload(Task.user), joinedload(Task.category)).all()
@@ -32,6 +38,7 @@ def list_tasks():
         result.append(data)
     return result, 200
 
+
 def get_task(task_id):
     task = db.session.get(Task, task_id)
     if not task:
@@ -40,111 +47,117 @@ def get_task(task_id):
     data["overdue"] = task.is_overdue()
     return data, 200
 
+
 def _parse_due_date(value):
     try:
         return datetime.strptime(value, "%Y-%m-%d"), None
     except (TypeError, ValueError):
         return None, {"error": "Formato de data inválido. Use YYYY-MM-DD"}
 
+
+def _validate_task_payload(data, require_title=False):
+    """Valida campos comuns entre criação e atualização de tarefas."""
+    if not isinstance(data, dict) or not data:
+        return None, ({"error": "Dados inválidos"}, 400)
+
+    fields = {}
+    if require_title or "title" in data:
+        title = data.get("title")
+        if require_title and not title:
+            return None, ({"error": "Título é obrigatório"}, 400)
+        if not isinstance(title, str):
+            return None, ({"error": "Título inválido"}, 400)
+        if len(title) < MIN_TITLE_LENGTH:
+            return None, ({"error": "Título muito curto"}, 400)
+        if len(title) > MAX_TITLE_LENGTH:
+            return None, ({"error": "Título muito longo"}, 400)
+        fields["title"] = title
+
+    if "description" in data:
+        fields["description"] = data["description"]
+    elif require_title:
+        fields["description"] = ""
+
+    if require_title or "status" in data:
+        status = data.get("status", "pending") if require_title else data["status"]
+        if status not in VALID_STATUSES:
+            return None, ({"error": "Status inválido"}, 400)
+        fields["status"] = status
+
+    if require_title or "priority" in data:
+        priority = data.get("priority", DEFAULT_PRIORITY) if require_title else data["priority"]
+        if isinstance(priority, bool) or not isinstance(priority, int) or priority < MIN_PRIORITY or priority > MAX_PRIORITY:
+            return None, ({"error": f"Prioridade deve ser entre {MIN_PRIORITY} e {MAX_PRIORITY}"}, 400)
+        fields["priority"] = priority
+
+    if require_title or "user_id" in data:
+        user_id = data.get("user_id")
+        if user_id and not db.session.get(User, user_id):
+            return None, ({"error": "Usuário não encontrado"}, 404)
+        fields["user_id"] = user_id
+
+    if require_title or "category_id" in data:
+        category_id = data.get("category_id")
+        if category_id and not db.session.get(Category, category_id):
+            return None, ({"error": "Categoria não encontrada"}, 404)
+        fields["category_id"] = category_id
+
+    if "due_date" in data:
+        if data["due_date"]:
+            parsed, erro = _parse_due_date(data["due_date"])
+            if erro:
+                return None, (erro, 400)
+            fields["due_date"] = parsed
+        else:
+            fields["due_date"] = None
+
+    if "tags" in data:
+        tags = data["tags"]
+        if tags or not require_title:
+            fields["tags"] = ",".join(tags) if isinstance(tags, list) else tags
+
+    return fields, None
+
+
 def create_task(data):
-    if not data:
-        return {"error": "Dados inválidos"}, 400
-    title = data.get("title")
-    if not title:
-        return {"error": "Título é obrigatório"}, 400
-    if len(title) < 3:
-        return {"error": "Título muito curto"}, 400
-    if len(title) > 200:
-        return {"error": "Título muito longo"}, 400
-
-    status = data.get("status", "pending")
-    priority = data.get("priority", 3)
-    user_id = data.get("user_id")
-    category_id = data.get("category_id")
-    if status not in VALID_STATUSES:
-        return {"error": "Status inválido"}, 400
-    if priority < 1 or priority > 5:
-        return {"error": "Prioridade deve ser entre 1 e 5"}, 400
-    if user_id and not db.session.get(User, user_id):
-        return {"error": "Usuário não encontrado"}, 404
-    if category_id and not db.session.get(Category, category_id):
-        return {"error": "Categoria não encontrada"}, 404
-
+    fields, erro = _validate_task_payload(data, require_title=True)
+    if erro:
+        return erro
     task = Task()
-    task.title = title
-    task.description = data.get("description", "")
-    task.status = status
-    task.priority = priority
-    task.user_id = user_id
-    task.category_id = category_id
-    if data.get("due_date"):
-        parsed, erro = _parse_due_date(data.get("due_date"))
-        if erro:
-            return erro, 400
-        task.due_date = parsed
-    tags = data.get("tags")
-    if tags:
-        task.tags = ",".join(tags) if isinstance(tags, list) else tags
-
+    for key, value in fields.items():
+        setattr(task, key, value)
     db.session.add(task)
     db.session.commit()
-    print(f"Task criada: {task.id} - {task.title}")
+    logger.info("Task criada: %s - %s", task.id, task.title)
     return task.to_dict(), 201
+
 
 def update_task(task_id, data):
     task = db.session.get(Task, task_id)
     if not task:
         return {"error": "Task não encontrada"}, 404
-    if not data:
-        return {"error": "Dados inválidos"}, 400
-    if "title" in data:
-        if len(data["title"]) < 3:
-            return {"error": "Título muito curto"}, 400
-        if len(data["title"]) > 200:
-            return {"error": "Título muito longo"}, 400
-        task.title = data["title"]
-    if "description" in data:
-        task.description = data["description"]
-    if "status" in data:
-        if data["status"] not in VALID_STATUSES:
-            return {"error": "Status inválido"}, 400
-        task.status = data["status"]
-    if "priority" in data:
-        if data["priority"] < 1 or data["priority"] > 5:
-            return {"error": "Prioridade deve ser entre 1 e 5"}, 400
-        task.priority = data["priority"]
-    if "user_id" in data:
-        if data["user_id"] and not db.session.get(User, data["user_id"]):
-            return {"error": "Usuário não encontrado"}, 404
-        task.user_id = data["user_id"]
-    if "category_id" in data:
-        if data["category_id"] and not db.session.get(Category, data["category_id"]):
-            return {"error": "Categoria não encontrada"}, 404
-        task.category_id = data["category_id"]
-    if "due_date" in data:
-        if data["due_date"]:
-            parsed, erro = _parse_due_date(data["due_date"])
-            if erro:
-                return {"error": "Formato de data inválido"}, 400
-            task.due_date = parsed
-        else:
-            task.due_date = None
-    if "tags" in data:
-        tags = data["tags"]
-        task.tags = ",".join(tags) if isinstance(tags, list) else tags
+    fields, erro = _validate_task_payload(data, require_title=False)
+    if erro:
+        return erro
+    for key, value in fields.items():
+        setattr(task, key, value)
     task.updated_at = utc_now()
     db.session.commit()
-    print(f"Task atualizada: {task.id}")
+    logger.info("Task atualizada: %s", task.id)
     return task.to_dict(), 200
 
-def delete_task(task_id):
+
+def delete_task(task_id, current_user):
     task = db.session.get(Task, task_id)
     if not task:
         return {"error": "Task não encontrada"}, 404
+    if current_user.get("role") not in ("admin", "manager") and task.user_id != current_user.get("id"):
+        return {"error": "Permissão insuficiente"}, 403
     db.session.delete(task)
     db.session.commit()
-    print(f"Task deletada: {task_id}")
+    logger.info("Task deletada: %s", task_id)
     return {"message": "Task deletada com sucesso"}, 200
+
 
 def search_tasks(filters):
     query = Task.query
@@ -157,10 +170,17 @@ def search_tasks(filters):
     if status:
         query = query.filter(Task.status == status)
     if priority:
-        query = query.filter(Task.priority == int(priority))
+        try:
+            query = query.filter(Task.priority == int(priority))
+        except ValueError:
+            return {"error": "Filtro numérico inválido"}, 400
     if user_id:
-        query = query.filter(Task.user_id == int(user_id))
+        try:
+            query = query.filter(Task.user_id == int(user_id))
+        except ValueError:
+            return {"error": "Filtro numérico inválido"}, 400
     return [task.to_dict() for task in query.all()], 200
+
 
 def task_stats():
     total = Task.query.count()

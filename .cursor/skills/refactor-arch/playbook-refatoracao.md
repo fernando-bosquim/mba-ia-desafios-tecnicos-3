@@ -307,13 +307,98 @@ Constantes de limite (`MIN_TITLE_LENGTH`, status válidos, alíquotas de descont
 - Substitua o número da regra pela constante de PB-10 quando ela já existir e a rota ignorava.
 - Apague import não usado no arquivo que você abriu para outro finding. Não varra o projeto inteiro atrás de import.
 
-## PB-12 — Privilégio sem quebrar o cliente
+## PB-12 — Proteção de rotas destrutivas e administrativas
 
-Achado AP-07, na Fase 3:
+Toda rota destrutiva, administrativa ou de escalação de privilégio apontada por `AP-07` na Fase 2 DEVE ser protegida na Fase 3, sem adicionar dependências externas fora do stack já instalado. Escolha a estratégia conforme o projeto já possuir fluxo de login ou não:
 
-- SQL livre do cliente: aplique PB-01 (recusa).
-- Demais rotas administrativas que o exemplo do projeto chama sem credencial: não adicione checagem que devolva 401. Deixe a rota funcionando e descreva no log de validação: "autorização não introduzida para preservar o contrato; finding mantido como dívida".
-- `role` vindo do body continua aceito se já era aceito. Não feche isso nesta passagem se o exemplo cria usuário com `role`.
+### Estratégia A — Projeto com `/login` e papéis (`admin`/`manager`) (Python/Flask)
+
+Antes:
+
+```python
+@app.route("/login", methods=["POST"])
+def login():
+    return jsonify({"user": user.to_dict(), "token": "fake-jwt-token-" + str(user.id)}), 200
+
+@app.route("/admin/reset-db", methods=["POST"])
+def reset_database():
+    ...
+```
+
+Depois:
+
+```python
+# middlewares/auth.py (usando itsdangerous já incluso no Flask)
+from functools import wraps
+from flask import g, jsonify, request
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from config.settings import SECRET_KEY, TOKEN_MAX_AGE
+
+_serializer = URLSafeTimedSerializer(SECRET_KEY, salt="app-auth")
+
+def gerar_token(usuario):
+    return _serializer.dumps({"id": usuario["id"], "email": usuario["email"], "role": usuario["role"]})
+
+def require_roles(*roles):
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            header = request.headers.get("Authorization", "")
+            if not header.startswith("Bearer "):
+                return jsonify({"erro": "Autenticação obrigatória"}), 401
+            try:
+                payload = _serializer.loads(header[7:].strip(), max_age=TOKEN_MAX_AGE)
+            except (BadSignature, SignatureExpired):
+                return jsonify({"erro": "Token inválido ou expirado"}), 401
+            if roles and payload.get("role") not in roles:
+                return jsonify({"erro": "Permissão insuficiente"}), 403
+            g.current_user = payload
+            return fn(*args, **kwargs)
+        return wrapper
+    return decorator
+```
+
+- `POST /login` passa a retornar o `token` assinado real (além dos campos de sucesso existentes).
+- Rotas destrutivas/administrativas (`/admin/*`, `DELETE`, `/reports/summary`) recebem `@require_auth` / `@require_roles(...)` (`401` sem token válido, `403` sem permissão).
+- Criação/edição de usuário impede auto-promoção anônima de `role`/`tipo`: apenas `admin` autenticado atribui papel privilegiado (`403` caso contrário).
+
+### Estratégia B — Projeto sem `/login` (Node.js/Express)
+
+Antes:
+
+```javascript
+app.delete('/api/users/:id', (req, res) => {
+    ...
+});
+```
+
+Depois:
+
+```javascript
+// src/middlewares/authMiddleware.js
+const crypto = require("crypto");
+const { config } = require("../config/settings");
+
+function requireAdmin(req, res, next) {
+    const authHeader = req.headers.authorization || "";
+    const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+    const provided = req.headers["x-admin-key"] || bearer;
+    if (!provided) {
+        return res.status(401).json({ error: "Credencial administrativa obrigatória" });
+    }
+    const a = Buffer.from(String(provided));
+    const b = Buffer.from(String(config.adminApiKey));
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+        return res.status(403).json({ error: "Credencial administrativa inválida" });
+    }
+    return next();
+}
+```
+
+- `ADMIN_API_KEY` é lida no módulo de `config` e documentada em `.env.example` (com fallback local explícito para desenvolvimento).
+- `DELETE` e rotas administrativas aplicam `requireAdmin` na view/rota; arquivos `.http` de exemplo do repositório são atualizados com `X-Admin-Key`.
+- Se existir rota de SQL arbitrário (`/admin/query`), combine `PB-12` (`401`/`403` para não-admin) com `PB-01` (recusa `400` mesmo para admin).
+- Registre todas as proteções no log de validação como mudanças intencionais de segurança.
 
 ## Ordem de aplicação
 

@@ -1,14 +1,12 @@
 from datetime import timedelta
 
-from sqlalchemy import func
 from sqlalchemy.orm import joinedload
 
-from database import db
 from models.category import Category
 from models.task import Task
 from models.user import User
 from utils.clock import utc_now
-from utils.helpers import DEFAULT_COLOR
+
 
 def summary():
     total_tasks = Task.query.count()
@@ -20,6 +18,7 @@ def summary():
     cancelled = Task.query.filter_by(status="cancelled").count()
     priorities = {level: Task.query.filter_by(priority=level).count() for level in range(1, 6)}
 
+    now = utc_now()
     overdue_list = []
     for task in Task.query.all():
         if not task.is_overdue():
@@ -28,10 +27,10 @@ def summary():
             "id": task.id,
             "title": task.title,
             "due_date": str(task.due_date),
-            "days_overdue": (utc_now() - task.due_date).days,
+            "days_overdue": (now - task.due_date).days,
         })
 
-    seven_days_ago = utc_now() - timedelta(days=7)
+    seven_days_ago = now - timedelta(days=7)
     recent_tasks = Task.query.filter(Task.created_at >= seven_days_ago).count()
     recent_done = Task.query.filter(Task.status == "done", Task.updated_at >= seven_days_ago).count()
 
@@ -48,7 +47,7 @@ def summary():
         })
 
     return {
-        "generated_at": str(utc_now()),
+        "generated_at": str(now),
         "overview": {
             "total_tasks": total_tasks,
             "total_users": total_users,
@@ -75,8 +74,11 @@ def summary():
         "user_productivity": user_stats,
     }, 200
 
-def user_report(user_id):
-    user = db.session.get(User, user_id)
+
+def user_report(user_id, current_user):
+    if current_user.get("role") not in ("admin", "manager") and current_user.get("id") != user_id:
+        return {"error": "Permissão insuficiente"}, 403
+    user = User.query.session.get(User, user_id)
     if not user:
         return {"error": "Usuário não encontrado"}, 404
     tasks = Task.query.filter_by(user_id=user_id).all()
@@ -108,50 +110,3 @@ def user_report(user_id):
             "completion_rate": round((done / total) * 100, 2) if total > 0 else 0,
         },
     }, 200
-
-def list_categories():
-    counts = dict(
-        db.session.query(Task.category_id, func.count(Task.id)).group_by(Task.category_id).all()
-    )
-    result = []
-    for category in Category.query.all():
-        data = category.to_dict()
-        data["task_count"] = counts.get(category.id, 0)
-        result.append(data)
-    return result, 200
-
-def create_category(data):
-    if not data:
-        return {"error": "Dados inválidos"}, 400
-    name = data.get("name")
-    if not name:
-        return {"error": "Nome é obrigatório"}, 400
-    category = Category()
-    category.name = name
-    category.description = data.get("description", "")
-    category.color = data.get("color", DEFAULT_COLOR)
-    db.session.add(category)
-    db.session.commit()
-    return category.to_dict(), 201
-
-def update_category(category_id, data):
-    category = db.session.get(Category, category_id)
-    if not category:
-        return {"error": "Categoria não encontrada"}, 404
-    data = data or {}
-    if "name" in data:
-        category.name = data["name"]
-    if "description" in data:
-        category.description = data["description"]
-    if "color" in data:
-        category.color = data["color"]
-    db.session.commit()
-    return category.to_dict(), 200
-
-def delete_category(category_id):
-    category = db.session.get(Category, category_id)
-    if not category:
-        return {"error": "Categoria não encontrada"}, 404
-    db.session.delete(category)
-    db.session.commit()
-    return {"message": "Categoria deletada"}, 200

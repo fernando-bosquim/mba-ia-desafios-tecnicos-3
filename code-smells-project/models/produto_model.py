@@ -1,5 +1,6 @@
 from database import get_db
 
+
 def _produto(row):
     return {
         "id": row["id"],
@@ -12,15 +13,18 @@ def _produto(row):
         "criado_em": row["criado_em"],
     }
 
+
 def listar():
     rows = get_db().execute("SELECT * FROM produtos").fetchall()
     return [_produto(row) for row in rows]
+
 
 def buscar_por_id(produto_id):
     row = get_db().execute("SELECT * FROM produtos WHERE id = ?", (produto_id,)).fetchone()
     if row is None:
         return None
     return _produto(row)
+
 
 def criar(nome, descricao, preco, estoque, categoria):
     cursor = get_db().execute(
@@ -29,6 +33,7 @@ def criar(nome, descricao, preco, estoque, categoria):
     )
     get_db().commit()
     return cursor.lastrowid
+
 
 def atualizar(produto_id, nome, descricao, preco, estoque, categoria):
     get_db().execute(
@@ -42,10 +47,12 @@ def atualizar(produto_id, nome, descricao, preco, estoque, categoria):
     get_db().commit()
     return True
 
+
 def deletar(produto_id):
     get_db().execute("DELETE FROM produtos WHERE id = ?", (produto_id,))
     get_db().commit()
     return True
+
 
 def buscar(termo, categoria=None, preco_min=None, preco_max=None):
     query = "SELECT * FROM produtos WHERE 1=1"
@@ -56,14 +63,15 @@ def buscar(termo, categoria=None, preco_min=None, preco_max=None):
     if categoria:
         query += " AND categoria = ?"
         params.append(categoria)
-    if preco_min:
+    if preco_min is not None:
         query += " AND preco >= ?"
         params.append(preco_min)
-    if preco_max:
+    if preco_max is not None:
         query += " AND preco <= ?"
         params.append(preco_max)
     rows = get_db().execute(query, params).fetchall()
     return [_produto(row) for row in rows]
+
 
 def contar():
     return get_db().execute("SELECT COUNT(*) FROM produtos").fetchone()[0]

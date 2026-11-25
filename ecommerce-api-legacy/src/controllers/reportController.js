@@ -1,12 +1,7 @@
-const { financialRows } = require("../models/repositories");
+const { findFinancialReportRows } = require("../models/courseRepository");
 
 async function financialReport(db) {
-    let rows;
-    try {
-        rows = await financialRows(db);
-    } catch (_err) {
-        return { status: 500, text: "Erro DB" };
-    }
+    const rows = await findFinancialReportRows(db);
 
     const report = [];
     const byCourse = new Map();

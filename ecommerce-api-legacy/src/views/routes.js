@@ -2,6 +2,7 @@ const express = require("express");
 const { checkout } = require("../controllers/checkoutController");
 const { financialReport } = require("../controllers/reportController");
 const { deleteUser } = require("../controllers/userController");
+const { requireAdmin } = require("../middlewares/authMiddleware");
 
 function send(res, result) {
     if (result.text !== undefined) {
@@ -21,7 +22,7 @@ function createRouter(db, cache) {
         }
     });
 
-    router.get("/api/admin/financial-report", async (req, res, next) => {
+    router.get("/api/admin/financial-report", requireAdmin, async (req, res, next) => {
         try {
             send(res, await financialReport(db));
         } catch (err) {
@@ -29,7 +30,7 @@ function createRouter(db, cache) {
         }
     });
 
-    router.delete("/api/users/:id", async (req, res, next) => {
+    router.delete("/api/users/:id", requireAdmin, async (req, res, next) => {
         try {
             send(res, await deleteUser(db, req.params.id));
         } catch (err) {

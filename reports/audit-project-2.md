@@ -54,15 +54,15 @@ CRITICAL: 3 | HIGH: 3 | MEDIUM: 3 | LOW: 2
 
 ### [HIGH] Relatório e delete sem fronteira de autorização — AP-07
 - File: src/AppManager.js:80
-- Description: `GET /api/admin/financial-report` devolve receita e alunos. `DELETE /api/users/:id` (`src/AppManager.js:131-136`) apaga o usuário e deixa matrícula e pagamento órfãos. Nenhuma rota lê credencial. O `api.http` chama as duas sem header.
+- Description: `GET /api/admin/financial-report` devolve receita e alunos. `DELETE /api/users/:id` (`src/AppManager.js:131-136`) apaga o usuário sem autenticação e deixa matrícula e pagamento órfãos no banco. Nenhuma rota lê credencial.
 - Evidence: `app.get('/api/admin/financial-report', (req, res) => {`
-- Impact: O relatório administrativo e o delete são públicos. O delete ainda suja `enrollments` e `payments`.
-- Recommendation: Não responder 401 nestas rotas. Registrar a dívida de autorização. Órfãos entram na extração do controller, sem mudar o texto da resposta do delete.
+- Impact: Qualquer cliente anônimo lê o relatório administrativo e apaga usuários, deixando registros financeiros órfãos.
+- Recommendation: Proteger `GET /api/admin/financial-report` e `DELETE /api/users/:id` com middleware exigindo `ADMIN_API_KEY` via `X-Admin-Key` ou `Authorization: Bearer` (`401`/`403`), remover `payments` e `enrollments` em transação antes de excluir o usuário no repositório, e atualizar o `api.http` com o header administrativo.
 - Playbook: PB-12
 
 ### [MEDIUM] Consulta por curso, matrícula, usuário e pagamento — AP-08
-- File: src/AppManager.js:89-123
-- Description: Para cada curso há um `SELECT` de matrículas; para cada matrícula, um `SELECT` de usuário e outro de pagamento. `coursesPending` e `enrPending` decidem quem chama `res.json`. Se `enrollments` vier `undefined` na falha, `enrollments.length` quebra (`src/AppManager.js:93`).
+- File: src/AppManager.js:92
+- Description: No laço de `src/AppManager.js:89-123`, para cada curso há um `SELECT` de matrículas; para cada matrícula, um `SELECT` de usuário e outro de pagamento. `coursesPending` e `enrPending` decidem quem chama `res.json`. Se `enrollments` vier `undefined` na falha, `enrollments.length` quebra (`src/AppManager.js:93`).
 - Evidence: `this.db.all("SELECT * FROM enrollments WHERE course_id = ?", [c.id], (err, enrollments) => {`
 - Impact: Volume de queries explode com o catálogo. Dois callbacks podem responder, ou nenhum responder, no mesmo request.
 - Recommendation: Uma consulta que já una curso, matrícula, usuário e pagamento, com um único `res.json` no formato atual (`course`, `revenue`, `students`).

@@ -1,11 +1,19 @@
+import logging
+
+from sqlalchemy.orm import joinedload
+
 from database import db
+from middlewares.auth import generate_token
 from models.task import Task
 from models.user import User
 from utils.helpers import MIN_PASSWORD_LENGTH, VALID_ROLES, validate_email
 
+logger = logging.getLogger(__name__)
+
+
 def list_users():
     result = []
-    for user in User.query.all():
+    for user in User.query.options(joinedload(User.tasks)).all():
         result.append({
             "id": user.id,
             "name": user.name,
@@ -16,6 +24,7 @@ def list_users():
             "task_count": len(user.tasks),
         })
     return result, 200
+
 
 def _user_tasks(user_id):
     result = []
@@ -32,6 +41,7 @@ def _user_tasks(user_id):
         })
     return result
 
+
 def get_user(user_id):
     user = db.session.get(User, user_id)
     if not user:
@@ -40,13 +50,15 @@ def get_user(user_id):
     data["tasks"] = [task.to_dict() for task in Task.query.filter_by(user_id=user_id).all()]
     return data, 200
 
+
 def user_tasks(user_id):
     if not db.session.get(User, user_id):
         return {"error": "Usuário não encontrado"}, 404
     return _user_tasks(user_id), 200
 
-def create_user(data):
-    if not data:
+
+def create_user(data, current_user=None):
+    if not isinstance(data, dict) or not data:
         return {"error": "Dados inválidos"}, 400
     name = data.get("name")
     email = data.get("email")
@@ -61,11 +73,14 @@ def create_user(data):
     if not validate_email(email):
         return {"error": "Email inválido"}, 400
     if len(password) < MIN_PASSWORD_LENGTH:
-        return {"error": "Senha deve ter no mínimo 4 caracteres"}, 400
-    if User.query.filter_by(email=email).first():
-        return {"error": "Email já cadastrado"}, 409
+        return {"error": f"Senha deve ter no mínimo {MIN_PASSWORD_LENGTH} caracteres"}, 400
     if role not in VALID_ROLES:
         return {"error": "Role inválido"}, 400
+    if role != "user" and (not current_user or current_user.get("role") != "admin"):
+        return {"error": "Apenas administradores podem atribuir este role"}, 403
+    if User.query.filter_by(email=email).first():
+        return {"error": "Email já cadastrado"}, 409
+
     user = User()
     user.name = name
     user.email = email
@@ -73,14 +88,15 @@ def create_user(data):
     user.role = role
     db.session.add(user)
     db.session.commit()
-    print(f"Usuário criado: {user.id} - {user.name}")
+    logger.info("Usuário criado: %s - %s", user.id, user.name)
     return user.to_dict(), 201
 
-def update_user(user_id, data):
+
+def update_user(user_id, data, current_user=None):
     user = db.session.get(User, user_id)
     if not user:
         return {"error": "Usuário não encontrado"}, 404
-    if not data:
+    if not isinstance(data, dict) or not data:
         return {"error": "Dados inválidos"}, 400
     if "name" in data:
         user.name = data["name"]
@@ -98,11 +114,14 @@ def update_user(user_id, data):
     if "role" in data:
         if data["role"] not in VALID_ROLES:
             return {"error": "Role inválido"}, 400
+        if data["role"] != user.role and (not current_user or current_user.get("role") != "admin"):
+            return {"error": "Apenas administradores podem alterar role"}, 403
         user.role = data["role"]
     if "active" in data:
         user.active = data["active"]
     db.session.commit()
     return user.to_dict(), 200
+
 
 def delete_user(user_id):
     user = db.session.get(User, user_id)
@@ -112,11 +131,12 @@ def delete_user(user_id):
         db.session.delete(task)
     db.session.delete(user)
     db.session.commit()
-    print(f"Usuário deletado: {user_id}")
+    logger.info("Usuário deletado: %s", user_id)
     return {"message": "Usuário deletado com sucesso"}, 200
 
+
 def login(data):
-    if not data:
+    if not isinstance(data, dict) or not data:
         return {"error": "Dados inválidos"}, 400
     email = data.get("email")
     password = data.get("password")
@@ -130,4 +150,5 @@ def login(data):
     return {
         "message": "Login realizado com sucesso",
         "user": user.to_dict(),
+        "token": generate_token(user),
     }, 200

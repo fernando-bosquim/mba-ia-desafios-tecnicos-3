@@ -63,11 +63,11 @@ Cada finding precisa de: id do catálogo, severidade, arquivo, linhas, descriç�
 
 ## AP-07 — Operação privilegiada sem fronteira
 
-- Severidade: HIGH quando a rota apaga dados, executa SQL livre, muda papel de usuário ou lê relatório financeiro completo, e não existe nenhuma função de autorização no projeto. MEDIUM quando a autorização existe e esta rota simplesmente não a chama.
-- Sinais: `reset`, `admin`, `delete` em massa, `role` definido pelo cliente, relatório agregado, sem leitura de sessão, token ou header em nenhum ponto do fluxo.
-- Não é finding para corrigir com 401 na Fase 3 se os clientes atuais chamam a rota sem credencial. Registre o achado. A única correção obrigatória na Fase 3 é fechar SQL arbitrário (AP-01).
-- Impacto: qualquer cliente opera como administrador.
-- Correção: PB-12.
+- Severidade: HIGH quando a rota apaga dados, reseta o banco, executa SQL livre, muda papel de usuário ou lê relatório administrativo/financeiro completo, e não existe nenhuma função de autorização no projeto. MEDIUM quando a autorização existe e esta rota simplesmente não a chama.
+- Sinais: `reset`, `admin`, `delete` destrutivo/em massa, `role`/`tipo` privilegiado definido pelo cliente sem checagem, relatório administrativo agregado, sem leitura nem validação de sessão, token assinado ou chave administrativa no fluxo.
+- Não é finding: rota que já passa por middleware/decorator de autenticação e autorização adequado ao seu papel, ou endpoint público de leitura/negócio que não altera dados sensíveis nem expõe visão administrativa.
+- Impacto: qualquer cliente anônimo opera como administrador, apaga registros ou escala privilégios.
+- Correção: PB-12 (obrigatória na Fase 3 para todas as rotas destrutivas, administrativas e pontos de escalação de privilégio apontados na Fase 2).
 
 ## AP-08 — N+1 e consulta dentro de laço
 

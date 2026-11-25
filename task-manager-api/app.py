@@ -1,14 +1,15 @@
-from datetime import datetime
-
 from flask import Flask
 from flask_cors import CORS
 
 from config.settings import DATABASE_URI, DEBUG, HOST, PORT, SECRET_KEY
 from database import db
 from middlewares.error_handler import register_error_handler
+from routes.category_routes import category_bp
 from routes.report_routes import report_bp
 from routes.task_routes import task_bp
 from routes.user_routes import user_bp
+from utils.clock import utc_now
+
 
 def create_app():
     application = Flask(__name__)
@@ -21,10 +22,11 @@ def create_app():
     application.register_blueprint(task_bp)
     application.register_blueprint(user_bp)
     application.register_blueprint(report_bp)
+    application.register_blueprint(category_bp)
 
     @application.route("/health")
     def health():
-        return {"status": "ok", "timestamp": str(datetime.now())}
+        return {"status": "ok", "timestamp": str(utc_now())}
 
     @application.route("/")
     def index():
@@ -32,11 +34,14 @@ def create_app():
 
     return application
 
+
 app = create_app()
+
 
 def init_database():
     with app.app_context():
         db.create_all()
+
 
 if __name__ == "__main__":
     init_database()

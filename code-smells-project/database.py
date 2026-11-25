@@ -5,6 +5,7 @@ from werkzeug.security import generate_password_hash
 
 from config.settings import DATABASE_PATH
 
+
 def get_db():
     if "db" not in g:
         connection = sqlite3.connect(DATABASE_PATH)
@@ -12,10 +13,30 @@ def get_db():
         g.db = connection
     return g.db
 
+
 def close_db(_exc=None):
     connection = g.pop("db", None)
     if connection is not None:
         connection.close()
+
+
+def ping_db():
+    get_db().execute("SELECT 1").fetchone()
+
+
+def reset_db():
+    """Apaga todos os dados das tabelas da loja em uma transação."""
+    db = get_db()
+    try:
+        db.execute("DELETE FROM itens_pedido")
+        db.execute("DELETE FROM pedidos")
+        db.execute("DELETE FROM produtos")
+        db.execute("DELETE FROM usuarios")
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
 
 def init_db():
     db = get_db()

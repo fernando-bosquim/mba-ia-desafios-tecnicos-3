@@ -25,8 +25,8 @@ CRITICAL: 5 | HIGH: 3 | MEDIUM: 3 | LOW: 2
 - Description: `POST /admin/query` lê `sql` do JSON e chama `cursor.execute` com essa string. `SELECT` devolve as linhas; qualquer outro comando faz commit.
 - Evidence: `cursor.execute(query)`
 - Impact: Quem alcança a porta administra o banco. Não há allowlist nem autenticação.
-- Recommendation: Manter `POST /admin/query` e o formato `{"erro": ...}`. Recusar a execução de SQL do cliente com 400.
-- Playbook: PB-01
+- Recommendation: Manter `POST /admin/query`, proteger a rota para exigir administrador autenticado (`PB-12`) e recusar a execução de SQL do cliente com 400 no formato `{"erro": ...}` (`PB-01`).
+- Playbook: PB-01 + PB-12
 
 ### [CRITICAL] Segredo no fonte e de novo no health — AP-02
 - File: app.py:7
@@ -70,10 +70,10 @@ CRITICAL: 5 | HIGH: 3 | MEDIUM: 3 | LOW: 2
 
 ### [HIGH] Reset do banco sem fronteira de autorização — AP-07
 - File: app.py:47-57
-- Description: `POST /admin/reset-db` apaga `itens_pedido`, `pedidos`, `produtos` e `usuarios`. Nenhuma rota do projeto lê sessão, token ou papel.
+- Description: `POST /admin/reset-db` apaga `itens_pedido`, `pedidos`, `produtos` e `usuarios`. Nenhuma rota do projeto lê sessão, token ou papel, e `POST /login` não emite token.
 - Evidence: `cursor.execute("DELETE FROM usuarios")`
-- Impact: Um POST anônimo zera a loja.
-- Recommendation: Registrar o achado. Na Fase 3, não inventar 401 que mude o contrato desta rota; a correção obrigatória de privilégio é o fechamento do SQL livre em `/admin/query`.
+- Impact: Qualquer cliente anônimo zera a loja via `POST /admin/reset-db` ou opera `/admin/query`.
+- Recommendation: Emitir token assinado com `SECRET_KEY` em `POST /login` e proteger `POST /admin/reset-db` e `POST /admin/query` com middleware de autenticação/autorização exigindo `tipo == 'admin'` (`401` sem credencial válida, `403` sem permissão). Mover o reset de infraestrutura para `database.py`, fora dos models de domínio.
 - Playbook: PB-12
 
 ### [MEDIUM] N+1 ao montar pedido, item e produto — AP-08
@@ -85,11 +85,11 @@ CRITICAL: 5 | HIGH: 3 | MEDIUM: 3 | LOW: 2
 - Playbook: PB-05
 
 ### [MEDIUM] Validação de produto copiada em criar e atualizar — AP-09
-- File: controllers.py:31-50
-- Description: Presença de nome, preço e estoque, limites de tamanho e preço negativo estão repetidos em `atualizar_produto` (`controllers.py:74-90`). A lista de categorias válidas só existe no criar.
+- File: controllers.py:30-50
+- Description: Presença de nome, preço e estoque, limites de tamanho e preço negativo estão repetidos em `atualizar_produto` (`controllers.py:74-90`). A lista de categorias válidas e limites de tamanho de nome só existem no criar.
 - Evidence: `if "nome" not in dados:`
-- Impact: Uma regra nova de produto precisa ser editada duas vezes e a atualização já divergiu (não valida categoria).
-- Recommendation: Uma função de validação usada pelas duas operações, com as mesmas mensagens.
+- Impact: Uma regra nova de produto precisa ser editada duas vezes e a atualização já divergiu (não valida categoria nem tamanho de nome).
+- Recommendation: Uma função de validação única usada tanto na criação quanto na atualização, com as mesmas regras e mensagens.
 - Playbook: PB-10
 
 ### [MEDIUM] Exceção interna vira corpo HTTP — AP-11

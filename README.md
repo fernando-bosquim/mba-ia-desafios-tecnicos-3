@@ -19,7 +19,7 @@ API de e-commerce. Quatro arquivos (`app.py`, `controllers.py`, `models.py`, `da
 | CRITICAL | `models.py:1-314` | Um módulo faz SQL e a regra de produto, usuário, pedido e relatório | Testar um domínio exige carregar os outros quatro |
 | HIGH | `controllers.py:188-250` | Estoque, status e "envio" de e-mail/SMS/push dentro da função da rota | A regra fica dentro do `request` |
 | MEDIUM | `models.py:186-193` | Para cada pedido, uma query de itens; para cada item, uma query de produto | O custo cresce com pedidos × itens, e a query ainda é concatenada |
-| MEDIUM | `controllers.py:31-50` e `74-90` | A mesma validação de produto está escrita duas vezes, e a de categoria só no criar | A atualização já divergiu da criação |
+| MEDIUM | `controllers.py:30-50` e `74-90` | A mesma validação de produto está escrita duas vezes, e a de categoria só no criar | A atualização já divergiu da criação |
 | LOW | `models.py:257-262` | Limiares `10000`, `5000`, `1000` e taxas `0.1`, `0.05`, `0.02` soltos | Os literais são a regra de desconto |
 | LOW | `controllers.py:8` | `print` com concatenação no fluxo feliz | Ruído na saída |
 
@@ -98,16 +98,22 @@ O relatório padrão sai como `reports/audit-<pasta>.md`. Os nomes `audit-projec
 
 ### Contrato HTTP
 
-A Fase 3 inventaria método, caminho, status e chaves antes da primeira edição. Rota que o `api.http` chama sem credencial continua aceitando a chamada sem credencial. Campo que vaza senha, hash ou número do cartão pode sair da resposta. SQL enviado pelo cliente deixa de executar. A rota e a chave de erro permanecem. O login com a senha do seed continua válido. O hash novo aceita MD5 ou texto puro uma vez e regrava.
+A Fase 3 inventaria método, caminho, status e chaves antes da primeira edição. Rotas públicas de negócio não apontadas por `AP-07` seguem aceitando chamadas sem credencial. Campo que vaza senha, hash, segredo, cartão ou token fictício sai da resposta. SQL enviado pelo cliente deixa de executar (`400`).
 
-Monolito e task manager usam a mesma skill. O monolito recebe pasta nova. O task manager recebe um controller sobre o que já existe. Os dois sobem depois da refatoração.
+Para todas as rotas destrutivas, administrativas ou de escalação de privilégio apontadas por `AP-07` na Fase 2, `PB-12` exige proteção na Fase 3 como mudança intencional de segurança:
+
+- **Projetos com `/login` e papéis (`code-smells-project` e `task-manager-api`):** `POST /login` emite `token` assinado com `SECRET_KEY` (`itsdangerous.URLSafeTimedSerializer`, já incluso no Flask). Rotas administrativas e destrutivas exigem `Authorization: Bearer <token>` e devolvem `401` (sem token válido), `403` (sem permissão) e `200` (autorizada, ou `400` para recusa de SQL arbitrário em `/admin/query`). Atribuição anônima de `role` privilegiado também é bloqueada (`403`).
+- **Projeto sem `/login` (`ecommerce-api-legacy`):** `GET /api/admin/financial-report` e `DELETE /api/users/:id` exigem `X-Admin-Key` (ou `Authorization: Bearer <key>`) comparado em tempo constante (`crypto.timingSafeEqual`) com `ADMIN_API_KEY` do módulo de `config` (`401` ausente, `403` inválida, `200` autorizada).
+
+Monolito e task manager usam a mesma skill. O monolito recebe pasta nova. O task manager recebe controllers, `config/`, `middlewares/` e extração de `categories` sobre o que já existe. Os três sobem depois da refatoração.
 
 ### Desafios
 
 - `check_same_thread=False` entra em AP-06 como estado global. O playbook usa `flask.g` para cada request do Flask ter a própria conexão.
-- Hash novo quebra o seed se o login só comparar digest. PB-07 mantém o caminho legado.
+- Hash novo quebra o seed se o login só comparar digest. PB-07 mantém o caminho legado com upgrade transparente no login.
 - `Query.get` é API obsoleta (MEDIUM). N+1 é outro achado (MEDIUM), mesmo quando os dois aparecem na mesma linha. A correção trata os dois em separado.
-- O serviço de e-mail que fazia `print` segue fazendo `print`.
+- Rotas destrutivas/administrativas apontadas por `AP-07` sem mecanismo prévio de autenticação: `PB-12` define duas estratégias sem adicionar dependências externas (token assinado via `itsdangerous` quando há `/login`, ou `ADMIN_API_KEY` via config quando não há login), garantindo `401`/`403` sem bloquear rotas públicas de negócio.
+- O serviço de e-mail que fazia `print` ou log pode usar logging estruturado sem depender de servidor SMTP externo.
 
 ## Resultados
 
@@ -176,9 +182,9 @@ API obsoleta: nenhuma no projeto 1; `sqlite3.verbose()` no projeto 2; `datetime.
 
 | Projeto | Antes | Depois |
 |---|---|---|
-| code-smells-project | `app.py`, `controllers.py`, `models.py`, `database.py` | `app.py` fino, `config/`, `models/`, `controllers/`, `views/routes.py`, `middlewares/` |
-| ecommerce-api-legacy | `src/app.js`, `AppManager.js`, `utils.js` | `src/app.js` fino, `config/`, `models/`, `controllers/`, `views/routes.js`, `middlewares/` |
-| task-manager-api | `models/`, `routes/` gordas, `services/`, `utils/` | As pastas permanecem. Entraram `controllers/`, `config/` e `middlewares/`. A rota só encaminha. O ORM ficou |
+| code-smells-project | `app.py`, `controllers.py`, `models.py`, `database.py` | `app.py` fino, `config/`, `models/` (sem regra de desconto nem `reset` em `pedido_model`), `controllers/`, `views/routes.py`, `middlewares/auth.py` e `middlewares/error_handler.py` |
+| ecommerce-api-legacy | `src/app.js`, `AppManager.js`, `utils.js` | `src/app.js` fino, `src/config/`, `src/models/` (`db.js` + repositórios por entidade: `course`, `user`, `enrollment`, `payment`, `auditLog`), `src/controllers/`, `src/views/routes.js`, `src/middlewares/authMiddleware.js` e `errorHandler.js` |
+| task-manager-api | `models/`, `routes/` gordas (categorias dentro de reports), `services/`, `utils/` | `models/`, `services/` e `utils/` permanecem. Entraram `controllers/` (incluindo `category_controller.py`), `routes/category_routes.py`, `config/`, `middlewares/auth.py` e `middlewares/error_handler.py`. Rotas finas; ORM preservado |
 
 ### Checklist de validação
 
@@ -265,43 +271,98 @@ API obsoleta: nenhuma no projeto 1; `sqlite3.verbose()` no projeto 2; `datetime.
 
 ### Validação da Fase 3
 
-Mudanças de contrato feitas de propósito, porque o relatório pedia:
+Mudanças de contrato intencionais de segurança (registradas conforme `AP-01`, `AP-02`, `AP-04` e `AP-07`/`PB-12`):
 
-- Loja: `/health` não devolve mais `secret_key`. Listagem de usuário não devolve `senha`. `POST /admin/query` responde 400 `Query não permitida` e não executa o SQL. Login com `joao@email.com` / `123456` continua 200.
-- LMS: sucesso do checkout, o texto `Pagamento recusado` e o texto do delete permanecem. O número do cartão e a chave do gateway saíram do log.
-- Tarefas: login continua 200 com a senha do seed `1234`, sem o campo `password` e sem o token fictício.
+- **Loja (`code-smells-project`):** `/health` não devolve mais `secret_key`, `db_path` nem `debug`. `GET /usuarios` e `GET /usuarios/<id>` não devolvem `senha`. `POST /login` emite `token` assinado com `SECRET_KEY`. `POST /admin/reset-db` e `POST /admin/query` exigem token de administrador (`401` anônimo, `403` cliente comum, `200` no reset para admin, e `400` `Query não permitida` para SQL do cliente mesmo autenticado como admin). `PUT /produtos/<id>` passa a validar categoria e tamanho do nome de forma idêntica ao `POST /produtos`.
+- **LMS (`ecommerce-api-legacy`):** `POST /api/checkout` mantém sucesso (`200`), `"Pagamento recusado"` (`400`) e `"Bad Request"` (`400`), sem expor número do cartão nem chave de gateway no log. `GET /api/admin/financial-report` e `DELETE /api/users/:id` exigem `X-Admin-Key` (ou `Authorization: Bearer`) válido (`401` ausente, `403` inválido, `200` autorizado). `DELETE /api/users/:id` agora remove `payments` e `enrollments` em transação antes do usuário (retornando `404` se não existir), eliminando registros órfãos.
+- **Tarefas (`task-manager-api`):** `POST /login` continua `200` com as senhas do seed (`1234`, `abcd`, `pass`), sem `password`, substituindo o token fictício por `token` assinado real. `GET /reports/summary` (`admin`/`manager`), `GET /reports/user/<id>` (próprio usuário ou `admin`/`manager`), `DELETE /categories/<id>` (`admin`/`manager`), `DELETE /tasks/<id>` (dono ou `admin`/`manager`) e `DELETE /users/<id>` (`admin`) respondem `401`/`403` quando não autorizados e `200` quando autorizados. `POST /users` e `PUT /users/<id>` bloqueiam atribuição de `role` privilegiado sem token de administrador (`403`).
 
-Boot e chamadas reais:
+Logs reais de boot e validação ponta a ponta (executados após as alterações finais):
 
-```
-code-smells-project  python app.py
-GET /health   200   sem secret_key
-GET /produtos 200
-POST /login   200   joao@email.com / 123456, sem senha no JSON
-POST /admin/query {"sql":"DROP TABLE usuarios"}  400  Query não permitida
+#### 1. `code-smells-project` (`python app.py` — 31/31 verificações)
+
+```text
+==================================================
+SERVIDOR INICIADO
+Rodando em http://0.0.0.0:5000
+==================================================
+ * Serving Flask app 'app'
+ * Debug mode: off
+ * Running on http://127.0.0.1:5000
+
+GET  /health                              -> 200 (sem secret_key/db_path/debug)
+GET  /produtos                            -> 200 (10 produtos do seed)
+GET  /produtos/busca?preco_min=abc        -> 400 {"erro": "Parâmetro de preço inválido"}
+PUT  /produtos/11 (categoria invalida)    -> 400 {"erro": "Categoria inválida..."}
+GET  /usuarios                            -> 200 (sem campo senha)
+POST /login (joao@email.com / 123456)     -> 200 (token Bearer cliente)
+POST /login (admin@loja.com / admin123)   -> 200 (token Bearer admin)
+POST /pedidos                             -> 201 {"dados": {"pedido_id": 1, "total": 179.8}}
+GET  /relatorios/vendas                   -> 200
+POST /admin/query (anonimo)               -> 401 {"erro": "Autenticação obrigatória"}
+POST /admin/query (cliente)               -> 403 {"erro": "Acesso restrito a administradores"}
+POST /admin/query (admin, DROP TABLE)     -> 400 {"erro": "Query não permitida"}
+POST /admin/reset-db (anonimo)            -> 401 (GET /produtos permanece com 10 itens)
+POST /admin/reset-db (cliente)            -> 403 {"erro": "Acesso restrito a administradores"}
+POST /admin/reset-db (admin)              -> 200 {"mensagem": "Banco de dados resetado", "sucesso": true}
 ```
 
-```
-ecommerce-api-legacy  npm start
-POST /api/checkout cartão 4111...   200  {"msg":"Sucesso","enrollment_id":2}
-POST /api/checkout cartão 5111...   400  Pagamento recusado
-GET  /api/admin/financial-report    200  Clean Architecture 997 e Docker 497
-DELETE /api/users/1                 200  texto original de matrículas órfãs
+#### 2. `ecommerce-api-legacy` (`npm start` — 12/12 verificações)
+
+```text
+> desafio-arquitetura-ia-boilerplate@1.0.0 start
+> node src/app.js
+
+Frankenstein LMS rodando na porta 3000...
+Checkout aprovado: matrícula 2, status PAID
+Pagamento recusado: usuário 3, curso 1
+
+POST   /api/checkout (cartão 4111...)             -> 200 {"msg": "Sucesso", "enrollment_id": 2}
+POST   /api/checkout (cartão 5111...)             -> 400 "Pagamento recusado"
+POST   /api/checkout (campos ausentes)            -> 400 "Bad Request"
+GET    /api/admin/financial-report (sem header)   -> 401 {"error": "Credencial administrativa obrigatória"}
+GET    /api/admin/financial-report (chave errada) -> 403 {"error": "Credencial administrativa inválida"}
+GET    /api/admin/financial-report (X-Admin-Key)  -> 200 (Clean Architecture 997, Docker 497)
+DELETE /api/users/1 (sem header)                  -> 401 {"error": "Credencial administrativa obrigatória"}
+DELETE /api/users/1 (chave errada)                -> 403 {"error": "Credencial administrativa inválida"}
+DELETE /api/users/1 (X-Admin-Key)                 -> 200 {"msg": "Usuário e registros vinculados removidos com sucesso"}
+GET    /api/admin/financial-report (pós-delete)   -> 200 (Clean Architecture revenue: 0, students: [] — zero órfãos)
+DELETE /api/users/999 (X-Admin-Key)               -> 404 {"error": "Usuário não encontrado"}
 ```
 
-```
-task-manager-api  python seed.py && python app.py
-GET /health            200
-GET /tasks             200
-GET /reports/summary   200
-POST /login            200  joao@email.com / 1234, sem password e sem token
-```
+#### 3. `task-manager-api` (`python -W default seed.py && python -W default app.py` — 45/45 verificações, zero `DeprecationWarning` e zero `LegacyAPIWarning`)
 
-O cliente de teste do Flask cobriu o restante das rotas da loja (18 chamadas) e do task manager (listagem, busca, stats, usuários, categorias, criação e login inválido), sem falha.
+```text
+Seed concluído com sucesso!
+  3 usuários
+  4 categorias
+  10 tasks
+
+ * Serving Flask app 'app'
+ * Debug mode: off
+ * Running on http://127.0.0.1:5000
+
+GET    /health                             -> 200
+GET    /tasks                              -> 200 (10 tasks)
+GET    /tasks/search?priority=abc          -> 400 {"error": "Filtro numérico inválido"}
+GET    /users                              -> 200 (3 usuários, sem password)
+GET    /categories                         -> 200 (4 categorias)
+POST   /login (joao/maria/pedro do seed)   -> 200 (token assinado real, sem password)
+POST   /users (anônimo com role=admin)     -> 403 {"error": "Apenas administradores podem atribuir este role"}
+PUT    /users/4 (user comum role=admin)    -> 403 {"error": "Apenas administradores podem alterar role"}
+GET    /reports/summary (anônimo / user)   -> 401 / 403
+GET    /reports/summary (admin)            -> 200
+GET    /reports/user/1 (anônimo / maria)   -> 401 / 403
+GET    /reports/user/2 (maria próprio)     -> 200
+DELETE /tasks/1 (anônimo / maria / joao)   -> 401 / 403 / 200
+DELETE /categories/4 (anônimo / user / mgr)-> 401 / 403 / 200 (categoria nova)
+DELETE /users/2 (anônimo / user / manager) -> 401 / 403 / 403
+DELETE /users/4 (admin)                    -> 200 {"message": "Usuário deletado com sucesso"}
+```
 
 ### O que a skill fez de diferente em cada stack
 
-No Flask monolítico os findings graves são SQL e o módulo único. No Express o grave é a classe que é o processo, mais segredo e cartão no log; o SQL de negócio já usa `?`, então AP-01 não dispara à toa. No Flask com camadas a skill não finge God class: marca rota gorda, MD5, `create_all` no import e a API obsoleta do ORM. O mesmo catálogo, três desenhos.
+No Flask monolítico os findings graves são SQL, segredo no health e módulo único. No Express o grave é a classe que é o processo, SQL nos controllers, registros órfãos no delete, mais segredo e cartão no log; o SQL de negócio já usa `?`, então AP-01 não dispara à toa. No Flask com camadas a skill não finge God class: marca rota gorda, categorias acopladas em relatórios, MD5, token fictício, `create_all` no import e a API obsoleta do ORM. O mesmo catálogo, três desenhos — e nos três projetos `AP-07`/`PB-12` protege efetivamente as rotas destrutivas e administrativas.
 
 ## Como executar
 
@@ -348,7 +409,7 @@ pip install -r requirements.txt
 python app.py
 ```
 
-`GET http://localhost:5000/health` responde 200. `GET http://localhost:5000/produtos` devolve a lista do seed. O JSON de health não traz `secret_key`.
+`GET http://localhost:5000/health` responde 200 (sem `secret_key`). `GET http://localhost:5000/produtos` devolve os 10 produtos do seed. `POST /admin/reset-db` e `POST /admin/query` respondem `401` sem token, `403` para cliente comum (`joao@email.com` / `123456`) e exigem o Bearer token de `admin@loja.com` / `admin123` obtido em `POST /login` (`/admin/query` ainda recusa SQL arbitrário com `400`).
 
 ```bash
 cd ecommerce-api-legacy
@@ -356,7 +417,7 @@ npm install
 npm start
 ```
 
-Os três pedidos de `api.http` continuam válidos na porta 3000: checkout com cartão `4111...` em 200, cartão `5111...` em 400 com o texto `Pagamento recusado`, relatório em 200 e delete em 200.
+Os exemplos de `api.http` funcionam na porta 3000: checkout com cartão `4111...` em `200`, cartão `5111...` em `400` (`Pagamento recusado`). `GET /api/admin/financial-report` e `DELETE /api/users/1` exigem `X-Admin-Key: dev-admin-key-change-me` (`401` sem chave, `403` chave inválida, `200` autorizado, sem deixar matrículas nem pagamentos órfãos).
 
 ```bash
 cd task-manager-api
@@ -365,4 +426,4 @@ python seed.py
 python app.py
 ```
 
-`GET http://localhost:5000/health`, `GET /tasks`, `POST /login` com `joao@email.com` e `1234`. O login segue aceitando a senha do seed e o JSON não traz `password`.
+`GET /health`, `GET /tasks`, `GET /categories` e `POST /login` (`joao@email.com` / `1234`) retornam `200`, sem `password` e com `token` assinado real. Use `Authorization: Bearer <token>` nas rotas protegidas (`/reports/summary`, `/reports/user/<id>`, `DELETE /tasks/<id>`, `DELETE /categories/<id>` e `DELETE /users/<id>`).

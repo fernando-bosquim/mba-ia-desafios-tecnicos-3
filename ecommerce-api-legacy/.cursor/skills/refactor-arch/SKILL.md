@@ -89,14 +89,15 @@ Só comece com autorização explícita dada depois do relatório.
    - instale dependências se faltarem;
    - suba o processo e registre host e porta lidos do código;
    - chame cada rota inventariada, inclusive o caminho de erro fácil (recurso inexistente ou corpo vazio);
+   - para toda rota protegida por `PB-12`, valide os três cenários: sem credencial (`401`), credencial sem privilégio ou chave inválida (`403`) e chamada autorizada (`200`, ou `400` para recusa de SQL arbitrário);
    - se o boot ou uma rota quebrar, corrija e repita. Não siga para o banner de sucesso.
 7. Imprima o banner da Fase 3 com a árvore real e o resultado de cada checagem.
 
 ## Regras da Fase 3 que não se negociam
 
-- Caminho, método e status de sucesso dos endpoints originais permanecem.
-- Chaves de JSON de sucesso permanecem. Remover campo que vaza senha, segredo, cartão ou token é mudança intencional: registre no log de validação.
-- Não crie autenticação nova que faça as chamadas atuais, feitas sem credencial, passarem a responder 401. Achado de "falta auth" fica no relatório. A exceção é execução de SQL enviado pelo cliente: a rota permanece, a execução arbitrária acaba, a resposta de recusa usa o formato de erro que o projeto já tinha.
+- Caminho, método e status de sucesso (para chamadas autorizadas) dos endpoints originais permanecem.
+- Chaves de JSON de sucesso permanecem. Remover campo que vaza senha, segredo, cartão ou token fictício é mudança intencional; adicionar campo `token` assinado no login quando necessário para `PB-12` também é mudança intencional. Registre ambas no log de validação.
+- Toda rota destrutiva ou administrativa apontada por `AP-07` na Fase 2 DEVE ser protegida na Fase 3 via `PB-12` (`401` sem credencial válida, `403` sem permissão ou chave inválida, `200` quando autorizada), registrando a proteção como mudança intencional de segurança. Rotas de SQL arbitrário também recusam SQL do cliente com `400`. Rotas públicas de negócio não apontadas em `AP-07` permanecem abertas.
 - Login com a mesma senha dos dados de exemplo continua funcionando depois de trocar o armazenamento por hash.
 - Não troque de banco, não adicione framework e não renomeie o domínio.
 - Idioma das mensagens já existentes permanece.

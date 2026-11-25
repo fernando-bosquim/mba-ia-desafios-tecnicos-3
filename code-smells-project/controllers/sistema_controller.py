@@ -1,10 +1,15 @@
-from config.settings import DATABASE_PATH, DEBUG
+import logging
+
+from database import ping_db, reset_db
 import models.pedido_model as pedido_model
 import models.produto_model as produto_model
 import models.usuario_model as usuario_model
 
+logger = logging.getLogger(__name__)
+
+
 def health():
-    pedido_model.ping()
+    ping_db()
     return {
         "status": "ok",
         "database": "connected",
@@ -15,17 +20,17 @@ def health():
         },
         "versao": "1.0.0",
         "ambiente": "producao",
-        "db_path": DATABASE_PATH,
-        "debug": DEBUG,
     }, 200
 
+
 def resetar():
-    pedido_model.limpar()
-    print("!!! BANCO DE DADOS RESETADO !!!")
+    reset_db()
+    logger.warning("Banco de dados resetado por administrador autenticado")
     return {"mensagem": "Banco de dados resetado", "sucesso": True}, 200
 
+
 def recusar_sql(dados):
-    query = (dados or {}).get("sql", "")
+    query = (dados if isinstance(dados, dict) else {}).get("sql", "")
     if not query:
         return {"erro": "Query não informada"}, 400
     return {"erro": "Query não permitida"}, 400

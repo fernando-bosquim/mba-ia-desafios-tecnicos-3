@@ -1,10 +1,13 @@
-const { run } = require("../models/db");
+const { findActiveCourseById } = require("../models/courseRepository");
 const {
     DEFAULT_PASSWORD,
     hashPassword,
-    findCourse,
     findUserByEmail,
-} = require("../models/repositories");
+    createUser,
+} = require("../models/userRepository");
+const { createEnrollment } = require("../models/enrollmentRepository");
+const { createPayment } = require("../models/paymentRepository");
+const { createAuditLog } = require("../models/auditLogRepository");
 
 async function checkout(db, cache, body) {
     const name = body.usr;
@@ -17,75 +20,33 @@ async function checkout(db, cache, body) {
         return { status: 400, text: "Bad Request" };
     }
 
-    let course;
-    try {
-        course = await findCourse(db, courseId);
-    } catch (_err) {
-        return { status: 404, text: "Curso não encontrado" };
-    }
+    const course = await findActiveCourseById(db, courseId);
     if (!course) {
         return { status: 404, text: "Curso não encontrado" };
     }
 
-    let user;
-    try {
-        user = await findUserByEmail(db, email);
-    } catch (_err) {
-        return { status: 500, text: "Erro DB" };
-    }
-
+    const user = await findUserByEmail(db, email);
     let userId = user && user.id;
     if (!userId) {
-        try {
-            const created = await run(
-                db,
-                "INSERT INTO users (name, email, pass) VALUES (?, ?, ?)",
-                [name, email, hashPassword(password || DEFAULT_PASSWORD)],
-            );
-            userId = created.lastID;
-        } catch (_err) {
-            return { status: 500, text: "Erro ao criar usuário" };
-        }
+        userId = await createUser(db, {
+            name,
+            email,
+            passwordHash: hashPassword(password || DEFAULT_PASSWORD),
+        });
     }
 
     const status = String(card).startsWith("4") ? "PAID" : "DENIED";
     if (status === "DENIED") {
+        console.log(`Pagamento recusado: usuário ${userId}, curso ${courseId}`);
         return { status: 400, text: "Pagamento recusado" };
     }
 
-    let enrollmentId;
-    try {
-        const enrollment = await run(
-            db,
-            "INSERT INTO enrollments (user_id, course_id) VALUES (?, ?)",
-            [userId, courseId],
-        );
-        enrollmentId = enrollment.lastID;
-    } catch (_err) {
-        return { status: 500, text: "Erro Matrícula" };
-    }
-
-    try {
-        await run(
-            db,
-            "INSERT INTO payments (enrollment_id, amount, status) VALUES (?, ?, ?)",
-            [enrollmentId, course.price, status],
-        );
-    } catch (_err) {
-        return { status: 500, text: "Erro Pagamento" };
-    }
-
-    try {
-        await run(
-            db,
-            "INSERT INTO audit_logs (action, created_at) VALUES (?, datetime('now'))",
-            [`Checkout curso ${courseId} por ${userId}`],
-        );
-    } catch (_err) {
-        // o fluxo original respondia 200 mesmo se a auditoria falhasse
-    }
+    const enrollmentId = await createEnrollment(db, { userId, courseId });
+    await createPayment(db, { enrollmentId, amount: course.price, status });
+    await createAuditLog(db, `Checkout curso ${courseId} por ${userId}`);
 
     cache.set(`last_checkout_${userId}`, course.title);
+    console.log(`Checkout aprovado: matrícula ${enrollmentId}, status ${status}`);
     return { status: 200, body: { msg: "Sucesso", enrollment_id: enrollmentId } };
 }
 

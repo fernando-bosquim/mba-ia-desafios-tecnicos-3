@@ -44,20 +44,20 @@ CRITICAL: 2 | HIGH: 3 | MEDIUM: 4 | LOW: 2
 - Recommendation: Mover `create_all` para o boot (`__main__` ou factory chamada pelo processo).
 - Playbook: PB-06
 
-### [HIGH] Token que ninguém confere — AP-07
+### [HIGH] Token fictício, escalação de papel e rotas destrutivas abertas — AP-07
 - File: routes/user_routes.py:210
-- Description: O login devolve `fake-jwt-token-<id>`. Nenhuma rota lê `Authorization` nem o papel `admin` / `manager`. Delete de usuário, delete de tarefa e relatórios são anônimos. O `role` do body em `routes/user_routes.py:53` vira papel da conta.
+- Description: O login devolve `fake-jwt-token-<id>`. Nenhuma rota lê `Authorization` nem o papel `admin` / `manager`. `DELETE /users/<id>`, `DELETE /tasks/<id>`, `DELETE /categories/<id>` e `GET /reports/*` são anônimos. O `role` do body em `routes/user_routes.py:52` e `122` vira papel privilegiado da conta sem checagem.
 - Evidence: `'token': 'fake-jwt-token-' + str(user.id)`
-- Impact: O token sugere sessão e não protege nada. Qualquer cliente opera qualquer conta.
-- Recommendation: Não adicionar 401. As chamadas atuais não mandam credencial. Dívida registrada; o token deixa de ir na resposta se for tratado como segredo de mentira, e o restante do JSON de login permanece.
+- Impact: O token não protege nada; qualquer cliente anônimo cria conta `admin`, apaga usuários/tarefas/categorias e lê relatórios completos.
+- Recommendation: Emitir token assinado real em `POST /login` (usando `SECRET_KEY`), proteger rotas destrutivas e administrativas (`DELETE /users/<id>`, `DELETE /tasks/<id>`, `DELETE /categories/<id>`, `GET /reports/*`) com `@require_auth`/`@require_roles` (`401`/`403`), e restringir atribuição de `role` privilegiado a administradores autenticados.
 - Playbook: PB-12
 
-### [MEDIUM] N+1 na listagem de tarefas e no relatório — AP-08
+### [MEDIUM] N+1 na listagem de tarefas, usuários e no relatório — AP-08
 - File: routes/task_routes.py:42-52
-- Description: Para cada tarefa, a listagem busca o usuário e a categoria com `query.get`, embora `Task.user` e `Task.category` já existam. `GET /categories` conta tarefas com uma query por categoria (`routes/report_routes.py:163`). O resumo percorre usuários e, para cada um, carrega as tarefas (`routes/report_routes.py:53-61`).
+- Description: Para cada tarefa, a listagem busca o usuário e a categoria com `query.get`, embora `Task.user` e `Task.category` já existam. `GET /users` acessa `len(u.tasks)` no laço (`routes/user_routes.py:15-24`). `GET /categories` conta tarefas com uma query por categoria (`routes/report_routes.py:163`). O resumo percorre usuários e, para cada um, carrega as tarefas (`routes/report_routes.py:53-61`).
 - Evidence: `user = User.query.get(t.user_id)`
-- Impact: Listar tarefas dispara 1 + 2N queries. O relatório repete o padrão por usuário e por categoria.
-- Recommendation: `joinedload` nas relações já mapeadas, e contagem agrupada para categoria.
+- Impact: Listar tarefas dispara 1 + 2N queries e listar usuários dispara 1 + N queries. O relatório repete o padrão por usuário e por categoria.
+- Recommendation: `joinedload` nas relações já mapeadas (`Task.user`, `Task.category`, `User.tasks`) e contagem agrupada para categoria.
 - Playbook: PB-05
 
 ### [MEDIUM] Atraso e validação reescritos em quatro lugares — AP-09
