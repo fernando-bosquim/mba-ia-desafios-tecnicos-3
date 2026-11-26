@@ -83,12 +83,12 @@ O `SKILL.md` manda ler o material da fase atual. A auditoria usa o catálogo e o
 
 A escala do curso define a severidade. SQL concatenada, segredo e God module são CRITICAL. Rota gorda e estado global são HIGH. N+1, duplicação, API obsoleta e erro engolido são MEDIUM. Nome, número mágico e import morto são LOW.
 
-O catálogo fixa dois critérios neste código:
+As heurísticas da skill foram mantidas 100% genéricas (sem nomes de arquivo, rotas, variáveis ou versões dos projetos de exemplo) e validadas às cegas sobre o código original do commit `6d1ce62`:
 
-- God module é um arquivo que mistura SQL, regra e mais de uma entidade. `models.py` do projeto 1 faz isso num módulo de funções.
-- Projeto com `models/` e `routes/` segue o modo evolutivo na Fase 3. Entram `controllers/` e `config/`. A rota fica fina. O ORM permanece.
+- God module (`AP-03`) identifica qualquer classe ou módulo de funções que mistura persistência/SQL, regra de negócio e mais de uma entidade.
+- Projetos que já possuem `models/` e `routes/` selecionam automaticamente o modo evolutivo na Fase 3 (preservando ORM e adicionando `controllers/`, `config/` e `middlewares/`).
 
-AP-10 é a passagem obrigatória de API obsoleta. Cada item tem substituto. A lista traz `datetime.utcnow`, `Query.get`, MD5 de senha, `sqlite3.verbose()`, `body-parser`, `app.del`, `res.sendfile`, `new Buffer` e `before_first_request`. No projeto 3 ela acha `utcnow` e `Query.get`. No projeto 2, `sqlite3.verbose()`. No projeto 1, o relatório registra a varredura vazia.
+AP-10 é a passagem obrigatória de API obsoleta. Cada item tem substituto genérico por stack (`datetime.utcnow`, `.query.get(`, MD5/SHA1 em senha, `sqlite3.verbose()`, `body-parser`, `app.del`, `res.sendfile`, `new Buffer`, `@app.before_first_request`). Nos testes cegos, a skill encontrou zero APIs obsoletas no projeto 1, `sqlite3.verbose()` no projeto 2, e `datetime.utcnow`, `.query.get()` e `hashlib.md5` no projeto 3.
 
 ### Stack e relatório
 
@@ -127,11 +127,11 @@ PHASE 1: PROJECT ANALYSIS
 ================================
 Language:      Python
 Framework:     Flask 3.1.1
-Dependencies:  flask-cors 5.0.1
-Domain:        API de e-commerce (produtos, usuários, pedidos)
-Architecture:  Monolítica — quatro arquivos, sem pacote de domínio
+Dependencies:  flask==3.1.1, flask-cors==5.0.1
+Domain:        API de e-commerce para gestão de produtos, usuários, autenticação, pedidos, relatórios de vendas e administração do banco.
+Architecture:  Monolítica — HTTP, validação, regras de negócio e acesso SQL convivem em 4 arquivos na raiz sem pacotes de domínio.
 Source files:  4 files analyzed
-DB:            SQLite (loja.db) | tables: produtos, usuarios, pedidos, itens_pedido
+DB:            SQLite (loja.db, seed automático no boot) | tables: produtos, usuarios, pedidos, itens_pedido
 Entry:         app.py:88 | 0.0.0.0:5000
 ================================
 ```
@@ -141,12 +141,12 @@ Entry:         app.py:88 | 0.0.0.0:5000
 PHASE 1: PROJECT ANALYSIS
 ================================
 Language:      JavaScript
-Framework:     Express ^4.18.2
-Dependencies:  sqlite3 ^5.1.6
-Domain:        LMS com checkout (usuários, cursos, matrículas, pagamentos)
-Architecture:  Monolítica — AppManager abre o banco e registra as rotas
+Framework:     Express ^4.18.2 (resolvido 4.22.1)
+Dependencies:  express ^4.18.2, sqlite3 ^5.1.6 (resolvido 5.1.7)
+Domain:        LMS / e-commerce de cursos com checkout, matrículas, pagamentos, relatório financeiro administrativo e remoção de usuários.
+Architecture:  Monolítica — inicialização de banco, rotas HTTP, validação, regras de negócio e queries SQL convivem em src/AppManager.js, apoiado por src/app.js e src/utils.js.
 Source files:  3 files analyzed
-DB:            SQLite em memória | tables: users, courses, enrollments, payments, audit_logs
+DB:            SQLite em memória (:memory:, seed automático no boot) | tables: users, courses, enrollments, payments, audit_logs
 Entry:         src/app.js:12 | localhost:3000
 ================================
 ```
@@ -156,12 +156,12 @@ Entry:         src/app.js:12 | localhost:3000
 PHASE 1: PROJECT ANALYSIS
 ================================
 Language:      Python
-Framework:     Flask 3.0.0 + Flask-SQLAlchemy 3.1.1
-Dependencies:  flask-cors 4.0.0, marshmallow 3.20.1 (sem uso), requests 2.31.0 (sem uso), python-dotenv 1.0.0 (sem uso)
-Domain:        API de tarefas (tasks, users, categories)
-Architecture:  Camadas parciais — models, routes, services e utils; a rota ainda concentra a regra
-Source files:  12 files analyzed
-DB:            SQLite (tasks.db) | tables: users, tasks, categories
+Framework:     Flask 3.0.0
+Dependencies:  flask==3.0.0, flask-sqlalchemy==3.1.1, flask-cors==4.0.0, marshmallow==3.20.1, requests==2.31.0, python-dotenv==1.0.0
+Domain:        Gerenciamento de tarefas, usuários, categorias e relatórios de produtividade (`/tasks`, `/users`, `/categories`, `/reports`, `/login`).
+Architecture:  Camadas parciais — possui `models/`, `routes/`, `services/` e `utils/`, mas não há camada de controllers e as rotas concentram validação, regra de negócio e acesso direto ao ORM.
+Source files:  15 files analyzed
+DB:            SQLite (`sqlite:///tasks.db` via SQLAlchemy) | tables: tasks, users, categories (seed manual via `seed.py`)
 Entry:         app.py:34 | 0.0.0.0:5000
 ================================
 ```
@@ -170,21 +170,21 @@ Entry:         app.py:34 | 0.0.0.0:5000
 
 | Projeto | Relatório | CRITICAL | HIGH | MEDIUM | LOW | Total |
 |---|---|---:|---:|---:|---:|---:|
-| code-smells-project | `reports/audit-project-1.md` | 5 | 3 | 3 | 2 | 13 |
-| ecommerce-api-legacy | `reports/audit-project-2.md` | 3 | 3 | 3 | 2 | 11 |
-| task-manager-api | `reports/audit-project-3.md` | 2 | 3 | 4 | 2 | 11 |
+| code-smells-project | `reports/audit-project-1.md` | 6 | 4 | 3 | 2 | 15 |
+| ecommerce-api-legacy | `reports/audit-project-2.md` | 5 | 4 | 3 | 3 | 15 |
+| task-manager-api | `reports/audit-project-3.md` | 4 | 7 | 8 | 3 | 22 |
 
-Os oito itens de cada análise manual estão nos relatórios. A Fase 2 acrescenta o que a leitura inicial não listou na tabela (SQL livre em `/admin/query`, senha em texto puro, conexão global, reset anônimo, hash caseiro, cache global, token fictício, `create_all` no import, `except` nu).
+Os oito itens de cada análise manual foram detectados organicamente pela skill genérica (sem referências aos projetos de exemplo), que ainda identificou achados adicionais como SQL livre em `/admin/query`, senha em texto puro no seed e no cadastro, conexão global com `check_same_thread=False`, rotas destrutivas/administrativas sem autenticação, hash caseiro, cache global, token fictício, `create_all` no import, N+1 em usuários/categorias e `except` nu.
 
-API obsoleta: nenhuma no projeto 1; `sqlite3.verbose()` no projeto 2; `datetime.utcnow`, `Query.get` e MD5 no projeto 3.
+API obsoleta: nenhuma no projeto 1; `sqlite3.verbose()` no projeto 2; `datetime.utcnow`, `.query.get()` e MD5 no projeto 3.
 
 ### Estrutura, antes e depois da Fase 3
 
 | Projeto | Antes | Depois |
 |---|---|---|
-| code-smells-project | `app.py`, `controllers.py`, `models.py`, `database.py` | `app.py` fino, `config/`, `models/` (sem regra de desconto nem `reset` em `pedido_model`), `controllers/`, `views/routes.py`, `middlewares/auth.py` e `middlewares/error_handler.py` |
-| ecommerce-api-legacy | `src/app.js`, `AppManager.js`, `utils.js` | `src/app.js` fino, `src/config/`, `src/models/` (`db.js` + repositórios por entidade: `course`, `user`, `enrollment`, `payment`, `auditLog`), `src/controllers/`, `src/views/routes.js`, `src/middlewares/authMiddleware.js` e `errorHandler.js` |
-| task-manager-api | `models/`, `routes/` gordas (categorias dentro de reports), `services/`, `utils/` | `models/`, `services/` e `utils/` permanecem. Entraram `controllers/` (incluindo `category_controller.py`), `routes/category_routes.py`, `config/`, `middlewares/auth.py` e `middlewares/error_handler.py`. Rotas finas; ORM preservado |
+| code-smells-project | `app.py`, `controllers.py`, `models.py`, `database.py` | `app.py` fino, `config/settings.py`, `models/` (`database`, `produto`, `usuario`, `pedido`, `relatorio`, `admin`), `controllers/`, `views/routes.py`, `middlewares/auth.py` e `middlewares/error_handler.py` |
+| ecommerce-api-legacy | `src/app.js`, `AppManager.js`, `utils.js` | `src/app.js` fino, `src/config/settings.js`, `src/models/` (`db`, `passwordHash`, `courseRepository`, `userRepository`, `enrollmentRepository`, `paymentRepository`, `reportRepository`, `auditLogRepository`), `src/controllers/`, `src/views/routes.js`, `src/middlewares/authMiddleware.js` e `errorHandler.js` |
+| task-manager-api | `models/`, `routes/` gordas (categorias dentro de reports), `services/`, `utils/` | `models/`, `services/` e `utils/` permanecem. Entraram `controllers/` (incluindo `category_controller.py`), `routes/category_routes.py`, `config/settings.py`, `middlewares/auth.py` e `middlewares/error_handler.py`. Rotas finas; ORM preservado |
 
 ### Checklist de validação
 
@@ -271,66 +271,58 @@ API obsoleta: nenhuma no projeto 1; `sqlite3.verbose()` no projeto 2; `datetime.
 
 ### Validação da Fase 3
 
+Execução limpa da skill genérica (sem vazamentos de domínio) por agentes isolados sobre o código original puro do commit `6d1ce62`.
+
 Mudanças de contrato intencionais de segurança (registradas conforme `AP-01`, `AP-02`, `AP-04` e `AP-07`/`PB-12`):
 
-- **Loja (`code-smells-project`):** `/health` não devolve mais `secret_key`, `db_path` nem `debug`. `GET /usuarios` e `GET /usuarios/<id>` não devolvem `senha`. `POST /login` emite `token` assinado com `SECRET_KEY`. `POST /admin/reset-db` e `POST /admin/query` exigem token de administrador (`401` anônimo, `403` cliente comum, `200` no reset para admin, e `400` `Query não permitida` para SQL do cliente mesmo autenticado como admin). `PUT /produtos/<id>` passa a validar categoria e tamanho do nome de forma idêntica ao `POST /produtos`.
-- **LMS (`ecommerce-api-legacy`):** `POST /api/checkout` mantém sucesso (`200`), `"Pagamento recusado"` (`400`) e `"Bad Request"` (`400`), sem expor número do cartão nem chave de gateway no log. `GET /api/admin/financial-report` e `DELETE /api/users/:id` exigem `X-Admin-Key` (ou `Authorization: Bearer`) válido (`401` ausente, `403` inválido, `200` autorizado). `DELETE /api/users/:id` agora remove `payments` e `enrollments` em transação antes do usuário (retornando `404` se não existir), eliminando registros órfãos.
-- **Tarefas (`task-manager-api`):** `POST /login` continua `200` com as senhas do seed (`1234`, `abcd`, `pass`), sem `password`, substituindo o token fictício por `token` assinado real. `GET /reports/summary` (`admin`/`manager`), `GET /reports/user/<id>` (próprio usuário ou `admin`/`manager`), `DELETE /categories/<id>` (`admin`/`manager`), `DELETE /tasks/<id>` (dono ou `admin`/`manager`) e `DELETE /users/<id>` (`admin`) respondem `401`/`403` quando não autorizados e `200` quando autorizados. `POST /users` e `PUT /users/<id>` bloqueiam atribuição de `role` privilegiado sem token de administrador (`403`).
+- **Loja (`code-smells-project`):** `/health` não devolve mais `secret_key`, `db_path` nem `debug`. `GET /usuarios` e `GET /usuarios/<id>` não devolvem `senha`. `POST /login` emite `token` assinado com `SECRET_KEY`. `POST /usuarios` bloqueia auto-promoção anônima de `tipo` privilegiado (`403`). `DELETE /produtos/<id>`, `GET /relatorios/vendas`, `POST /admin/reset-db` e `POST /admin/query` exigem `admin` (`401` anônimo, `403` não-admin, `200` autorizado; `/admin/query` continua recusando SQL arbitrário com `400`).
+- **LMS (`ecommerce-api-legacy`):** `POST /api/checkout` mantém sucesso (`200`), `"Pagamento recusado"` (`400`), `"Bad Request"` (`400`) e `"Curso não encontrado"` (`404`), sem expor número do cartão (PAN) nem chave de gateway no log. `GET /api/admin/financial-report` e `DELETE /api/users/:id` exigem `X-Admin-Key` (ou `Authorization: Bearer`) válido (`401` ausente, `403` inválida, `200` autorizada). `DELETE /api/users/:id` remove `payments` e `enrollments` em transação antes do usuário (retornando `404` se inexistente), eliminando órfãos.
+- **Tarefas (`task-manager-api`):** `POST /login` continua `200` com as senhas do seed (`1234`, `abcd`, `pass`), sem `password` e substituindo o token fictício por `token` assinado real. `DELETE /tasks/<id>` (`admin`/`manager`), `DELETE /users/<id>` (`admin`), `DELETE /categories/<id>` (`admin`), `GET /reports/summary` (`admin`/`manager`) e `GET /reports/user/<id>` (`admin`/`manager`) exigem token autorizado (`401`/`403`/`200`). `POST /users` e `PUT /users/<id>` impedem escalação anônima de `role`/`active` (`401`/`403`).
 
-Logs reais de boot e validação ponta a ponta (executados após as alterações finais):
+Logs reais de boot e validação ponta a ponta (capturados após a execução cega sobre o código final):
 
-#### 1. `code-smells-project` (`python app.py` — 31/31 verificações)
+#### 1. `code-smells-project` (`python -W default app.py` — 17/17 checks de smoke + 19/19 endpoints validados)
 
 ```text
-==================================================
-SERVIDOR INICIADO
-Rodando em http://0.0.0.0:5000
-==================================================
+INFO:app:Servidor iniciado em http://0.0.0.0:5000
  * Serving Flask app 'app'
  * Debug mode: off
  * Running on http://127.0.0.1:5000
 
 GET  /health                              -> 200 (sem secret_key/db_path/debug)
 GET  /produtos                            -> 200 (10 produtos do seed)
-GET  /produtos/busca?preco_min=abc        -> 400 {"erro": "Parâmetro de preço inválido"}
-PUT  /produtos/11 (categoria invalida)    -> 400 {"erro": "Categoria inválida..."}
 GET  /usuarios                            -> 200 (sem campo senha)
 POST /login (joao@email.com / 123456)     -> 200 (token Bearer cliente)
 POST /login (admin@loja.com / admin123)   -> 200 (token Bearer admin)
-POST /pedidos                             -> 201 {"dados": {"pedido_id": 1, "total": 179.8}}
-GET  /relatorios/vendas                   -> 200
-POST /admin/query (anonimo)               -> 401 {"erro": "Autenticação obrigatória"}
-POST /admin/query (cliente)               -> 403 {"erro": "Acesso restrito a administradores"}
-POST /admin/query (admin, DROP TABLE)     -> 400 {"erro": "Query não permitida"}
-POST /admin/reset-db (anonimo)            -> 401 (GET /produtos permanece com 10 itens)
-POST /admin/reset-db (cliente)            -> 403 {"erro": "Acesso restrito a administradores"}
-POST /admin/reset-db (admin)              -> 200 {"mensagem": "Banco de dados resetado", "sucesso": true}
+POST /usuarios (anônimo tipo=admin)       -> 403 {"erro": "Permissão insuficiente para definir tipo privilegiado"}
+DELETE /produtos/1 (anônimo / cliente)    -> 401 / 403
+GET  /relatorios/vendas (anônimo / cli / adm) -> 401 / 403 / 200
+POST /admin/query (anônimo / cli / adm)   -> 401 / 403 / 400 {"erro": "Execução de SQL arbitrário não é permitida"}
+POST /admin/reset-db (anônimo / cli / adm)-> 401 / 403 / 200 {"mensagem": "Banco de dados resetado", "sucesso": true}
 ```
 
-#### 2. `ecommerce-api-legacy` (`npm start` — 12/12 verificações)
+#### 2. `ecommerce-api-legacy` (`npm start` — 12/12 checks validados)
 
 ```text
 > desafio-arquitetura-ia-boilerplate@1.0.0 start
 > node src/app.js
 
-Frankenstein LMS rodando na porta 3000...
-Checkout aprovado: matrícula 2, status PAID
-Pagamento recusado: usuário 3, curso 1
+LMS API rodando em http://localhost:3000...
 
-POST   /api/checkout (cartão 4111...)             -> 200 {"msg": "Sucesso", "enrollment_id": 2}
-POST   /api/checkout (cartão 5111...)             -> 400 "Pagamento recusado"
-POST   /api/checkout (campos ausentes)            -> 400 "Bad Request"
-GET    /api/admin/financial-report (sem header)   -> 401 {"error": "Credencial administrativa obrigatória"}
-GET    /api/admin/financial-report (chave errada) -> 403 {"error": "Credencial administrativa inválida"}
-GET    /api/admin/financial-report (X-Admin-Key)  -> 200 (Clean Architecture 997, Docker 497)
-DELETE /api/users/1 (sem header)                  -> 401 {"error": "Credencial administrativa obrigatória"}
-DELETE /api/users/1 (chave errada)                -> 403 {"error": "Credencial administrativa inválida"}
-DELETE /api/users/1 (X-Admin-Key)                 -> 200 {"msg": "Usuário e registros vinculados removidos com sucesso"}
-GET    /api/admin/financial-report (pós-delete)   -> 200 (Clean Architecture revenue: 0, students: [] — zero órfãos)
-DELETE /api/users/999 (X-Admin-Key)               -> 404 {"error": "Usuário não encontrado"}
+POST   /api/checkout (cartão 4111...)              -> 200 {"msg": "Sucesso", "enrollment_id": 2}
+POST   /api/checkout (cartão 5111...)              -> 400 "Pagamento recusado"
+POST   /api/checkout (campos ausentes)             -> 400 "Bad Request"
+POST   /api/checkout (curso inexistente)           -> 404 "Curso não encontrado"
+GET    /api/admin/financial-report (sem chave)     -> 401 {"error": "Credencial administrativa obrigatória"}
+GET    /api/admin/financial-report (chave errada)  -> 403 {"error": "Credencial administrativa inválida"}
+GET    /api/admin/financial-report (X-Admin-Key)   -> 200 (Clean Architecture 997, Docker 497)
+DELETE /api/users/1 (sem chave / chave errada)     -> 401 / 403
+DELETE /api/users/1 (X-Admin-Key válida)           -> 200 "Usuário deletado com sucesso."
+GET    /api/admin/financial-report (pós-delete)    -> 200 (Clean Architecture revenue: 0, students: [] — zero órfãos)
+DELETE /api/users/999 (X-Admin-Key válida)         -> 404 "Usuário não encontrado"
 ```
 
-#### 3. `task-manager-api` (`python -W default seed.py && python -W default app.py` — 45/45 verificações, zero `DeprecationWarning` e zero `LegacyAPIWarning`)
+#### 3. `task-manager-api` (`python -W default seed.py && python -W default app.py` — 25/25 checks de smoke + 22/22 rotas validadas, zero `DeprecationWarning` e zero `LegacyAPIWarning`)
 
 ```text
 Seed concluído com sucesso!
@@ -342,22 +334,19 @@ Seed concluído com sucesso!
  * Debug mode: off
  * Running on http://127.0.0.1:5000
 
-GET    /health                             -> 200
-GET    /tasks                              -> 200 (10 tasks)
-GET    /tasks/search?priority=abc          -> 400 {"error": "Filtro numérico inválido"}
-GET    /users                              -> 200 (3 usuários, sem password)
-GET    /categories                         -> 200 (4 categorias)
-POST   /login (joao/maria/pedro do seed)   -> 200 (token assinado real, sem password)
-POST   /users (anônimo com role=admin)     -> 403 {"error": "Apenas administradores podem atribuir este role"}
-PUT    /users/4 (user comum role=admin)    -> 403 {"error": "Apenas administradores podem alterar role"}
-GET    /reports/summary (anônimo / user)   -> 401 / 403
-GET    /reports/summary (admin)            -> 200
-GET    /reports/user/1 (anônimo / maria)   -> 401 / 403
-GET    /reports/user/2 (maria próprio)     -> 200
-DELETE /tasks/1 (anônimo / maria / joao)   -> 401 / 403 / 200
-DELETE /categories/4 (anônimo / user / mgr)-> 401 / 403 / 200 (categoria nova)
-DELETE /users/2 (anônimo / user / manager) -> 401 / 403 / 403
-DELETE /users/4 (admin)                    -> 200 {"message": "Usuário deletado com sucesso"}
+GET    /health                              -> 200
+GET    /tasks                               -> 200 (10 tasks)
+GET    /users                               -> 200 (3 usuários, sem password)
+GET    /categories                          -> 200 (4 categorias)
+POST   /login (joao/maria/pedro do seed)    -> 200 (token assinado real, sem password)
+POST   /users (anônimo com role=admin)      -> 403 {"error": "Apenas administradores podem atribuir papel privilegiado"}
+POST   /users (anônimo padrão)              -> 201 (role: "user")
+GET    /reports/summary (anônimo / usr / adm) -> 401 / 403 / 200
+GET    /reports/user/1 (anônimo / usr / mgr)  -> 401 / 403 / 200
+DELETE /tasks/1 (anônimo / user / manager)  -> 401 / 403 / 200
+DELETE /categories/4 (anônimo / user / adm) -> 401 / 403 / 200
+DELETE /users/2 (anônimo / user / manager)  -> 401 / 403 / 403
+DELETE /users/4 (admin)                     -> 200 {"message": "Usuário deletado com sucesso"}
 ```
 
 ### O que a skill fez de diferente em cada stack
@@ -409,7 +398,7 @@ pip install -r requirements.txt
 python app.py
 ```
 
-`GET http://localhost:5000/health` responde 200 (sem `secret_key`). `GET http://localhost:5000/produtos` devolve os 10 produtos do seed. `POST /admin/reset-db` e `POST /admin/query` respondem `401` sem token, `403` para cliente comum (`joao@email.com` / `123456`) e exigem o Bearer token de `admin@loja.com` / `admin123` obtido em `POST /login` (`/admin/query` ainda recusa SQL arbitrário com `400`).
+`GET http://localhost:5000/health` responde 200 (sem `secret_key`). `GET http://localhost:5000/produtos` devolve os 10 produtos do seed. `DELETE /produtos/<id>`, `GET /relatorios/vendas`, `POST /admin/reset-db` e `POST /admin/query` respondem `401` sem token, `403` para cliente comum (`joao@email.com` / `123456`) e exigem o Bearer token de `admin@loja.com` / `admin123` obtido em `POST /login` (`/admin/query` ainda recusa SQL arbitrário com `400`).
 
 ```bash
 cd ecommerce-api-legacy
@@ -417,7 +406,7 @@ npm install
 npm start
 ```
 
-Os exemplos de `api.http` funcionam na porta 3000: checkout com cartão `4111...` em `200`, cartão `5111...` em `400` (`Pagamento recusado`). `GET /api/admin/financial-report` e `DELETE /api/users/1` exigem `X-Admin-Key: dev-admin-key-change-me` (`401` sem chave, `403` chave inválida, `200` autorizado, sem deixar matrículas nem pagamentos órfãos).
+Os exemplos de `api.http` funcionam na porta 3000: checkout com cartão `4111...` em `200`, cartão `5111...` em `400` (`Pagamento recusado`). `GET /api/admin/financial-report` e `DELETE /api/users/1` exigem `X-Admin-Key: dev-only-admin-key-change-me` (`401` sem chave, `403` chave inválida, `200` autorizado, sem deixar matrículas nem pagamentos órfãos).
 
 ```bash
 cd task-manager-api
@@ -426,4 +415,4 @@ python seed.py
 python app.py
 ```
 
-`GET /health`, `GET /tasks`, `GET /categories` e `POST /login` (`joao@email.com` / `1234`) retornam `200`, sem `password` e com `token` assinado real. Use `Authorization: Bearer <token>` nas rotas protegidas (`/reports/summary`, `/reports/user/<id>`, `DELETE /tasks/<id>`, `DELETE /categories/<id>` e `DELETE /users/<id>`).
+`GET /health`, `GET /tasks`, `GET /categories` e `POST /login` (`joao@email.com` / `1234`) retornam `200`, sem `password` e com `token` assinado real. Use `Authorization: Bearer <token>` nas rotas protegidas (`GET /reports/summary`, `GET /reports/user/<id>` e `DELETE /tasks/<id>` para `admin`/`manager`; `DELETE /categories/<id>` e `DELETE /users/<id>` para `admin`).

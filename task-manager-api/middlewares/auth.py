@@ -1,69 +1,50 @@
 from functools import wraps
-
-from flask import g, jsonify, request
+from flask import current_app, g, jsonify, request
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
-from config.settings import SECRET_KEY, TOKEN_MAX_AGE
 
-_serializer = URLSafeTimedSerializer(SECRET_KEY, salt="task-manager-auth")
+def _get_serializer():
+    return URLSafeTimedSerializer(current_app.config["SECRET_KEY"], salt="task-manager-auth")
 
 
 def generate_token(user):
-    """Emite token assinado para o usuário autenticado."""
-    return _serializer.dumps({
+    payload = {
         "id": user.id,
         "email": user.email,
         "role": user.role,
-    })
+    }
+    return _get_serializer().dumps(payload)
 
 
-def decode_token(token):
-    """Valida a assinatura e expiração do token; retorna payload ou None."""
-    try:
-        return _serializer.loads(token, max_age=TOKEN_MAX_AGE)
-    except (BadSignature, SignatureExpired):
-        return None
-
-
-def _extract_bearer():
+def extract_token_payload():
     header = request.headers.get("Authorization", "")
     if not header.startswith("Bearer "):
-        return None
+        return None, "missing"
     token = header[7:].strip()
-    return token or None
-
-
-def get_optional_current_user():
-    """Retorna o usuário autenticado quando um Bearer token válido é enviado."""
-    token = _extract_bearer()
-    return decode_token(token) if token else None
-
-
-def require_auth(fn):
-    """Exige token Bearer válido no cabeçalho Authorization."""
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        token = _extract_bearer()
-        payload = decode_token(token) if token else None
-        if not payload:
-            return jsonify({"error": "Autenticação obrigatória"}), 401
-        g.current_user = payload
-        return fn(*args, **kwargs)
-    return wrapper
+    if not token:
+        return None, "missing"
+    max_age = current_app.config.get("TOKEN_MAX_AGE", 3600)
+    try:
+        payload = _get_serializer().loads(token, max_age=max_age)
+        return payload, None
+    except (BadSignature, SignatureExpired):
+        return None, "invalid"
 
 
 def require_roles(*roles):
-    """Exige usuário autenticado com um dos papéis permitidos."""
     def decorator(fn):
         @wraps(fn)
         def wrapper(*args, **kwargs):
-            token = _extract_bearer()
-            payload = decode_token(token) if token else None
-            if not payload:
+            payload, err = extract_token_payload()
+            if err == "missing":
                 return jsonify({"error": "Autenticação obrigatória"}), 401
-            if payload.get("role") not in roles:
+            if err == "invalid":
+                return jsonify({"error": "Token inválido ou expirado"}), 401
+            if roles and payload.get("role") not in roles:
                 return jsonify({"error": "Permissão insuficiente"}), 403
             g.current_user = payload
             return fn(*args, **kwargs)
+
         return wrapper
+
     return decorator

@@ -5,7 +5,8 @@ description: >-
   APIs obsoletas com arquivo e linha, e refatora para MVC só depois de
   confirmação humana, validando boot e endpoints. Use quando o usuário
   invocar refactor-arch, pedir auditoria arquitetural, code smells,
-  anti-patterns ou refatoração para MVC em Flask, Express ou outro backend.
+  anti-patterns ou refatoração para MVC em qualquer backend (Python,
+  JavaScript/TypeScript, Go, Java, PHP, Ruby, C#, etc.).
 disable-model-invocation: true
 ---
 
@@ -89,7 +90,7 @@ Só comece com autorização explícita dada depois do relatório.
    - instale dependências se faltarem;
    - suba o processo e registre host e porta lidos do código;
    - chame cada rota inventariada, inclusive o caminho de erro fácil (recurso inexistente ou corpo vazio);
-   - para toda rota protegida por `PB-12`, valide os três cenários: sem credencial (`401`), credencial sem privilégio ou chave inválida (`403`) e chamada autorizada (`200`, ou `400` para recusa de SQL arbitrário);
+   - para toda rota protegida por `PB-12`, valide os três cenários: sem credencial (`401`), credencial sem privilégio ou chave inválida (`403`) e chamada autorizada (status esperado do contrato ou recusa explícita de operação proibida);
    - se o boot ou uma rota quebrar, corrija e repita. Não siga para o banner de sucesso.
 7. Imprima o banner da Fase 3 com a árvore real e o resultado de cada checagem.
 

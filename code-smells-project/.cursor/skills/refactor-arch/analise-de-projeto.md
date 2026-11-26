@@ -40,7 +40,7 @@ Leia o manifest. Não chute a versão "latest".
 | `spring-boot` no pom ou gradle | Spring Boot |
 | `laravel/framework` | Laravel |
 
-Versão: o spec exato quando estiver pinado (`flask==3.1.1`). Quando for range (`^4.18.2`), registre o range e a versão instalada só se `node_modules` ou o lock file mostrar a versão resolvida. Não abra `node_modules` inteiro: use `package-lock.json` na chave `node_modules/<pacote>.version`, ou deixe o range.
+Versão: o spec exato quando estiver pinado (ex.: `pacote==2.4.0`). Quando for range (ex.: `^5.1.0`), registre o range e a versão instalada só se `node_modules` ou o lock file mostrar a versão resolvida. Não abra `node_modules` inteiro: use `package-lock.json` na chave `node_modules/<pacote>.version`, ou deixe o range.
 
 Dependências: liste os pacotes de runtime ligados a HTTP, ORM, banco, auth e CORS. Marque pacote declarado e não importado em lugar nenhum como dependência ociosa (isso vira finding na Fase 2, não no banner).
 
@@ -106,6 +106,6 @@ Entry:         <arquivo:linha> | <host>:<porta>
 ## 8. O que não fazer na Fase 1
 
 - Não listar anti-patterns ainda. Isso é a Fase 2.
-- Não estimar "uns 800 linhas". Conte.
+- Não estime a quantidade de linhas; conte exatamente os arquivos e linhas analisados.
 - Não tratar `routes/` existente como prova de MVC.
 - Não tratar ausência de pasta `views/` como defeito antes da auditoria. A Fase 1 descreve o que é, não o que deveria ser.

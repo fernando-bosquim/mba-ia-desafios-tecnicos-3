@@ -1,7 +1,7 @@
-from database import get_db
+from models.database import get_db
 
 
-def _produto(row):
+def _row_to_dict(row):
     return {
         "id": row["id"],
         "nome": row["nome"],
@@ -14,29 +14,50 @@ def _produto(row):
     }
 
 
-def listar():
-    rows = get_db().execute("SELECT * FROM produtos").fetchall()
-    return [_produto(row) for row in rows]
+def listar_todos():
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("SELECT * FROM produtos")
+    return [_row_to_dict(row) for row in cursor.fetchall()]
 
 
 def buscar_por_id(produto_id):
-    row = get_db().execute("SELECT * FROM produtos WHERE id = ?", (produto_id,)).fetchone()
-    if row is None:
-        return None
-    return _produto(row)
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("SELECT * FROM produtos WHERE id = ?", (produto_id,))
+    row = cursor.fetchone()
+    return _row_to_dict(row) if row else None
+
+
+def buscar_por_ids(produto_ids):
+    if not produto_ids:
+        return {}
+    ids_unicos = list(dict.fromkeys(produto_ids))
+    placeholders = ",".join("?" * len(ids_unicos))
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute(
+        f"SELECT * FROM produtos WHERE id IN ({placeholders})",
+        tuple(ids_unicos),
+    )
+    return {row["id"]: _row_to_dict(row) for row in cursor.fetchall()}
 
 
 def criar(nome, descricao, preco, estoque, categoria):
-    cursor = get_db().execute(
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute(
         "INSERT INTO produtos (nome, descricao, preco, estoque, categoria) VALUES (?, ?, ?, ?, ?)",
         (nome, descricao, preco, estoque, categoria),
     )
-    get_db().commit()
+    db.commit()
     return cursor.lastrowid
 
 
 def atualizar(produto_id, nome, descricao, preco, estoque, categoria):
-    get_db().execute(
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute(
         """
         UPDATE produtos
         SET nome = ?, descricao = ?, preco = ?, estoque = ?, categoria = ?
@@ -44,22 +65,30 @@ def atualizar(produto_id, nome, descricao, preco, estoque, categoria):
         """,
         (nome, descricao, preco, estoque, categoria, produto_id),
     )
-    get_db().commit()
+    db.commit()
     return True
 
 
 def deletar(produto_id):
-    get_db().execute("DELETE FROM produtos WHERE id = ?", (produto_id,))
-    get_db().commit()
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("DELETE FROM itens_pedido WHERE produto_id = ?", (produto_id,))
+    cursor.execute("DELETE FROM produtos WHERE id = ?", (produto_id,))
+    db.commit()
     return True
 
 
-def buscar(termo, categoria=None, preco_min=None, preco_max=None):
+def buscar(termo="", categoria=None, preco_min=None, preco_max=None):
+    db = get_db()
+    cursor = db.cursor()
+
     query = "SELECT * FROM produtos WHERE 1=1"
     params = []
+
     if termo:
+        padrao = f"%{termo}%"
         query += " AND (nome LIKE ? OR descricao LIKE ?)"
-        params.extend([f"%{termo}%", f"%{termo}%"])
+        params.extend([padrao, padrao])
     if categoria:
         query += " AND categoria = ?"
         params.append(categoria)
@@ -69,9 +98,6 @@ def buscar(termo, categoria=None, preco_min=None, preco_max=None):
     if preco_max is not None:
         query += " AND preco <= ?"
         params.append(preco_max)
-    rows = get_db().execute(query, params).fetchall()
-    return [_produto(row) for row in rows]
 
-
-def contar():
-    return get_db().execute("SELECT COUNT(*) FROM produtos").fetchone()[0]
+    cursor.execute(query, tuple(params))
+    return [_row_to_dict(row) for row in cursor.fetchall()]

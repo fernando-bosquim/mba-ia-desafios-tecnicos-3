@@ -1,44 +1,44 @@
-const express = require("express");
-const { checkout } = require("../controllers/checkoutController");
-const { financialReport } = require("../controllers/reportController");
-const { deleteUser } = require("../controllers/userController");
-const { requireAdmin } = require("../middlewares/authMiddleware");
+const express = require('express');
+const { requireAdmin } = require('../middlewares/authMiddleware');
 
-function send(res, result) {
+function sendResult(res, result) {
     if (result.text !== undefined) {
         return res.status(result.status).send(result.text);
     }
     return res.status(result.status).json(result.body);
 }
 
-function createRouter(db, cache) {
+function createRoutes({ checkoutController, reportController, userController }) {
     const router = express.Router();
 
-    router.post("/api/checkout", async (req, res, next) => {
+    router.post('/api/checkout', async (req, res, next) => {
         try {
-            send(res, await checkout(db, cache, req.body || {}));
+            const result = await checkoutController.checkout(req.body);
+            return sendResult(res, result);
         } catch (err) {
-            next(err);
+            return next(err);
         }
     });
 
-    router.get("/api/admin/financial-report", requireAdmin, async (req, res, next) => {
+    router.get('/api/admin/financial-report', requireAdmin, async (req, res, next) => {
         try {
-            send(res, await financialReport(db));
+            const result = await reportController.getFinancialReport();
+            return sendResult(res, result);
         } catch (err) {
-            next(err);
+            return next(err);
         }
     });
 
-    router.delete("/api/users/:id", requireAdmin, async (req, res, next) => {
+    router.delete('/api/users/:id', requireAdmin, async (req, res, next) => {
         try {
-            send(res, await deleteUser(db, req.params.id));
+            const result = await userController.deleteUser(req.params.id);
+            return sendResult(res, result);
         } catch (err) {
-            next(err);
+            return next(err);
         }
     });
 
     return router;
 }
 
-module.exports = { createRouter };
+module.exports = { createRoutes };

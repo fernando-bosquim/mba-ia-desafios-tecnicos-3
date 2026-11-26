@@ -1,53 +1,66 @@
-const { findActiveCourseById } = require("../models/courseRepository");
-const {
-    DEFAULT_PASSWORD,
-    hashPassword,
-    findUserByEmail,
-    createUser,
-} = require("../models/userRepository");
-const { createEnrollment } = require("../models/enrollmentRepository");
-const { createPayment } = require("../models/paymentRepository");
-const { createAuditLog } = require("../models/auditLogRepository");
+const { hashPassword } = require('../models/passwordHash');
 
-async function checkout(db, cache, body) {
-    const name = body.usr;
-    const email = body.eml;
-    const password = body.pwd;
-    const courseId = body.c_id;
-    const card = body.card;
+const APPROVED_CARD_PREFIX = '4';
+const DEFAULT_USER_PASSWORD = '123456';
+const PAYMENT_STATUS_PAID = 'PAID';
+const PAYMENT_STATUS_DENIED = 'DENIED';
 
-    if (!name || !email || !courseId || !card) {
-        return { status: 400, text: "Bad Request" };
-    }
+function createCheckoutController({
+    courseRepository,
+    userRepository,
+    enrollmentRepository,
+    paymentRepository,
+    auditLogRepository,
+    checkoutCache
+}) {
+    return {
+        async checkout(payload) {
+            const {
+                usr: userName,
+                eml: email,
+                pwd: password,
+                c_id: courseId,
+                card: cardNumber
+            } = payload || {};
 
-    const course = await findActiveCourseById(db, courseId);
-    if (!course) {
-        return { status: 404, text: "Curso não encontrado" };
-    }
+            if (!userName || !email || !courseId || !cardNumber) {
+                return { status: 400, text: 'Bad Request' };
+            }
 
-    const user = await findUserByEmail(db, email);
-    let userId = user && user.id;
-    if (!userId) {
-        userId = await createUser(db, {
-            name,
-            email,
-            passwordHash: hashPassword(password || DEFAULT_PASSWORD),
-        });
-    }
+            const course = await courseRepository.findActiveById(courseId);
+            if (!course) {
+                return { status: 404, text: 'Curso não encontrado' };
+            }
 
-    const status = String(card).startsWith("4") ? "PAID" : "DENIED";
-    if (status === "DENIED") {
-        console.log(`Pagamento recusado: usuário ${userId}, curso ${courseId}`);
-        return { status: 400, text: "Pagamento recusado" };
-    }
+            const paymentStatus = String(cardNumber).startsWith(APPROVED_CARD_PREFIX)
+                ? PAYMENT_STATUS_PAID
+                : PAYMENT_STATUS_DENIED;
 
-    const enrollmentId = await createEnrollment(db, { userId, courseId });
-    await createPayment(db, { enrollmentId, amount: course.price, status });
-    await createAuditLog(db, `Checkout curso ${courseId} por ${userId}`);
+            if (paymentStatus === PAYMENT_STATUS_DENIED) {
+                return { status: 400, text: 'Pagamento recusado' };
+            }
 
-    cache.set(`last_checkout_${userId}`, course.title);
-    console.log(`Checkout aprovado: matrícula ${enrollmentId}, status ${status}`);
-    return { status: 200, body: { msg: "Sucesso", enrollment_id: enrollmentId } };
+            let user = await userRepository.findByEmail(email);
+            let userId;
+            if (!user) {
+                const passwordHash = hashPassword(password || DEFAULT_USER_PASSWORD);
+                userId = await userRepository.create(userName, email, passwordHash);
+            } else {
+                userId = user.id;
+            }
+
+            const enrollmentId = await enrollmentRepository.create(userId, courseId);
+            await paymentRepository.create(enrollmentId, course.price, paymentStatus);
+            await auditLogRepository.create(`Checkout curso ${courseId} por ${userId}`);
+
+            checkoutCache.set(`last_checkout_${userId}`, course.title);
+
+            return {
+                status: 200,
+                body: { msg: 'Sucesso', enrollment_id: enrollmentId }
+            };
+        }
+    };
 }
 
-module.exports = { checkout };
+module.exports = { createCheckoutController };

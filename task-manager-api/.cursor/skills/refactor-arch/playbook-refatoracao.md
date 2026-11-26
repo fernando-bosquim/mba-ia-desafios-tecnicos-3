@@ -167,7 +167,7 @@ faturas = Fatura.query.options(
 
 Use a relação que já existe no model. Não abra `Cliente.query.get` dentro do `for`.
 
-Callback aninhado que conta `pending` para responder: troque por uma query que já devolve o pai e os filhos, ou por `Promise` encadeada com um único `res.json`. A forma do JSON de saída permanece.
+Callbacks aninhados com contador manual de pendências para responder: troque por uma query que já devolve o pai e os filhos, ou por `Promise` encadeada com um único envio de resposta. A forma do JSON de saída permanece.
 
 ## PB-06 — Estado global para o boot
 
@@ -198,7 +198,7 @@ def close_db(_exc):
         db.close()
 ```
 
-Cache em Node: objeto criado no boot e injetado no controller, não um `let` exportado de `utils.js` que qualquer rota muta. Contador de faturamento global sai. O total passa a ser consulta, se alguém realmente o lia. Se ninguém lia, apague o estado morto.
+Cache em memória: objeto criado no boot e injetado no controller, não uma variável mutável exportada em módulo utilitário compartilhado entre requisições. Acumuladores globais em memória devem ser removidos ou substituídos por consulta agregada no banco.
 
 `db.create_all()` vai para o bloco de boot (`__main__` ou factory chamada pelo processo), não no import. Importar o módulo deixa de criar arquivo e tabela.
 
@@ -250,7 +250,7 @@ Troca mecânica, uma a uma, com o mesmo comportamento:
 | `sqlite3.verbose()` | `require('sqlite3')` sem verbose, ou `node:sqlite` se o runtime do projeto for Node 22+ e o README permitir |
 | `@app.before_first_request` | chamada direta no factory, antes de servir |
 
-`datetime.now(timezone.utc)` é timezone-aware. Comparação com valor vindo do banco pode misturar aware e naive. Se o model gravava naive, normalize na leitura (`replace(tzinfo=timezone.utc)` só se o valor for naive) para `is_overdue` continuar verdadeiro nos mesmos casos. Não mude o formato da string que a API já devolve se o cliente recebe `str(data)`.
+`datetime.now(timezone.utc)` é timezone-aware. Comparação com valor vindo do banco pode misturar aware e naive. Se o model gravava naive, normalize na leitura ou use helper central de relógio para que comparações de prazo/expiração continuem equivalentes. Não mude o formato da string que a API já devolve se o cliente recebe `str(data)`.
 
 Não reescreve todas as `Model.query.filter` para `select()` nesta passagem. Só o `.query.get` está na tabela obsoleta.
 
@@ -285,8 +285,8 @@ Middleware de erro por último, com quatro parâmetros. Onde a rota respondia te
 Antes:
 
 ```python
-if t.due_date and t.due_date < datetime.now(timezone.utc) and t.status not in ("done", "cancelled"):
-    data["overdue"] = True
+if fatura.vencimento and fatura.vencimento < datetime.now(timezone.utc) and fatura.status not in ("paga", "cancelada"):
+    data["vencida"] = True
 ```
 
 A mesma condição aparece na listagem, no detalhe, no relatório e no model, escritos à mão.
@@ -294,41 +294,41 @@ A mesma condição aparece na listagem, no detalhe, no relatório e no model, es
 Depois:
 
 ```python
-data["overdue"] = task.is_overdue()
+data["vencida"] = fatura.esta_vencida()
 ```
 
-Escolha o helper ou o método de model que já tem a regra. Apague as cópias da rota e chame esse lugar. Se não existir, crie uma função no controller ou em `utils` de validação e use nas duas rotas (criar e atualizar).
+Escolha o helper ou o método de model que já tem a regra. Apague as cópias da rota e chame esse lugar. Se não existir, crie uma função única de validação/regra no controller ou em módulo de validação e use em todas as operações equivalentes (como criar e atualizar).
 
-Constantes de limite (`MIN_TITLE_LENGTH`, status válidos, alíquotas de desconto) ficam ao lado da regra, com o número que já estava no código. Não "melhore" a alíquota.
+Constantes de limite (tamanhos mínimos/máximos, status válidos, faixas ou alíquotas) ficam ao lado da regra, com o número que já estava no código. Não altere os valores de negócio.
 
 ## PB-11 — Nome, número mágico, import morto
 
-- Renomeie `u`, `e`, `p`, `cc` para o substantivo do campo quando mexer no bloco por outro playbook. Não faça um diff só de rename.
-- Substitua o número da regra pela constante de PB-10 quando ela já existir e a rota ignorava.
+- Renomeie variáveis crípticas ou de uma letra (como `x`, `a`, `b`, `tmp`) para o substantivo do domínio quando mexer no bloco por outro playbook. Não faça um diff só de rename.
+- Substitua o número literal da regra pela constante de PB-10 quando ela já existir e a rota a ignorava.
 - Apague import não usado no arquivo que você abriu para outro finding. Não varra o projeto inteiro atrás de import.
 
 ## PB-12 — Proteção de rotas destrutivas e administrativas
 
 Toda rota destrutiva, administrativa ou de escalação de privilégio apontada por `AP-07` na Fase 2 DEVE ser protegida na Fase 3, sem adicionar dependências externas fora do stack já instalado. Escolha a estratégia conforme o projeto já possuir fluxo de login ou não:
 
-### Estratégia A — Projeto com `/login` e papéis (`admin`/`manager`) (Python/Flask)
+### Estratégia A — Projeto com autenticação (`/login`) e papéis (ex.: Python/Flask)
 
 Antes:
 
 ```python
 @app.route("/login", methods=["POST"])
 def login():
-    return jsonify({"user": user.to_dict(), "token": "fake-jwt-token-" + str(user.id)}), 200
+    return jsonify({"account": account.to_dict(), "token": "static-token-" + str(account.id)}), 200
 
-@app.route("/admin/reset-db", methods=["POST"])
-def reset_database():
+@app.route("/admin/maintenance", methods=["POST"])
+def run_maintenance():
     ...
 ```
 
 Depois:
 
 ```python
-# middlewares/auth.py (usando itsdangerous já incluso no Flask)
+# middlewares/auth.py (usando serializer assinado nativo do stack, ex.: itsdangerous no Flask)
 from functools import wraps
 from flask import g, jsonify, request
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
@@ -336,8 +336,8 @@ from config.settings import SECRET_KEY, TOKEN_MAX_AGE
 
 _serializer = URLSafeTimedSerializer(SECRET_KEY, salt="app-auth")
 
-def gerar_token(usuario):
-    return _serializer.dumps({"id": usuario["id"], "email": usuario["email"], "role": usuario["role"]})
+def gerar_token(conta):
+    return _serializer.dumps({"id": conta["id"], "email": conta["email"], "role": conta["role"]})
 
 def require_roles(*roles):
     def decorator(fn):
@@ -358,16 +358,16 @@ def require_roles(*roles):
     return decorator
 ```
 
-- `POST /login` passa a retornar o `token` assinado real (além dos campos de sucesso existentes).
-- Rotas destrutivas/administrativas (`/admin/*`, `DELETE`, `/reports/summary`) recebem `@require_auth` / `@require_roles(...)` (`401` sem token válido, `403` sem permissão).
-- Criação/edição de usuário impede auto-promoção anônima de `role`/`tipo`: apenas `admin` autenticado atribui papel privilegiado (`403` caso contrário).
+- A rota de login passa a retornar um `token` assinado real (mantendo os demais campos de sucesso existentes).
+- Rotas destrutivas ou administrativas (reset/manutenção, exclusões sensíveis, relatórios gerenciais) recebem middleware de autenticação/autorização (`401` sem token válido, `403` sem permissão ou fora da propriedade do recurso).
+- Criação e atualização de contas impedem auto-promoção anônima de papel privilegiado: apenas administrador autenticado pode atribuir ou alterar papel privilegiado (`403` caso contrário).
 
-### Estratégia B — Projeto sem `/login` (Node.js/Express)
+### Estratégia B — Projeto sem fluxo de login (ex.: Node.js/Express)
 
 Antes:
 
 ```javascript
-app.delete('/api/users/:id', (req, res) => {
+app.delete('/api/records/:id', (req, res) => {
     ...
 });
 ```
@@ -395,9 +395,10 @@ function requireAdmin(req, res, next) {
 }
 ```
 
-- `ADMIN_API_KEY` é lida no módulo de `config` e documentada em `.env.example` (com fallback local explícito para desenvolvimento).
-- `DELETE` e rotas administrativas aplicam `requireAdmin` na view/rota; arquivos `.http` de exemplo do repositório são atualizados com `X-Admin-Key`.
-- Se existir rota de SQL arbitrário (`/admin/query`), combine `PB-12` (`401`/`403` para não-admin) com `PB-01` (recusa `400` mesmo para admin).
+- `ADMIN_API_KEY` é lida no módulo de `config` e documentada em `.env.example` (com fallback local explícito apenas para desenvolvimento).
+- Rotas destrutivas e administrativas aplicam o middleware de autorização na camada de rotas; arquivos `.http` ou exemplos do repositório são atualizados com o header administrativo.
+- Se existir rota que executava SQL arbitrário do cliente, combine `PB-12` (`401`/`403` para não-admin) com `PB-01` (recusa `400` mesmo autenticado).
+- Em exclusões de registros com entidades filhas, remova os registros dependentes em transação no repositório para não deixar órfãos no banco.
 - Registre todas as proteções no log de validação como mudanças intencionais de segurança.
 
 ## Ordem de aplicação

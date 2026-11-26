@@ -1,12 +1,12 @@
-const { run } = require("./db");
-
-async function createAuditLog(db, action) {
-    const result = await run(
-        db,
-        "INSERT INTO audit_logs (action, created_at) VALUES (?, datetime('now'))",
-        [action],
-    );
-    return result.lastID;
+function createAuditLogRepository(db) {
+    return {
+        create(action) {
+            return db.run(
+                "INSERT INTO audit_logs (action, created_at) VALUES (?, datetime('now'))",
+                [action]
+            );
+        }
+    };
 }
 
-module.exports = { createAuditLog };
+module.exports = { createAuditLogRepository };

@@ -1,52 +1,54 @@
 from database import db
-from utils.clock import utc_now
+from utils.helpers import (
+    DEFAULT_PRIORITY,
+    MAX_PRIORITY,
+    MIN_PRIORITY,
+    VALID_STATUSES,
+    normalize_utc,
+    utc_now,
+)
+
 
 class Task(db.Model):
-    __tablename__ = 'tasks'
+    __tablename__ = "tasks"
 
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(200), nullable=False)
     description = db.Column(db.Text, nullable=True)
-    status = db.Column(db.String(50), default='pending')
-    priority = db.Column(db.Integer, default=3)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
-    category_id = db.Column(db.Integer, db.ForeignKey('categories.id'), nullable=True)
+    status = db.Column(db.String(50), default="pending")
+    priority = db.Column(db.Integer, default=DEFAULT_PRIORITY)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    category_id = db.Column(db.Integer, db.ForeignKey("categories.id"), nullable=True)
     created_at = db.Column(db.DateTime, default=utc_now)
     updated_at = db.Column(db.DateTime, default=utc_now, onupdate=utc_now)
     due_date = db.Column(db.DateTime, nullable=True)
     tags = db.Column(db.String(500), nullable=True)
 
-    user = db.relationship('User', backref='tasks')
-    category = db.relationship('Category', backref='tasks')
+    user = db.relationship("User", backref="tasks")
+    category = db.relationship("Category", backref="tasks")
 
     def to_dict(self):
-        data = {}
-        data['id'] = self.id
-        data['title'] = self.title
-        data['description'] = self.description
-        data['status'] = self.status
-        data['priority'] = self.priority
-        data['user_id'] = self.user_id
-        data['category_id'] = self.category_id
-        data['created_at'] = str(self.created_at)
-        data['updated_at'] = str(self.updated_at)
-        data['due_date'] = str(self.due_date) if self.due_date else None
-        data['tags'] = self.tags.split(',') if self.tags else []
-        return data
+        return {
+            "id": self.id,
+            "title": self.title,
+            "description": self.description,
+            "status": self.status,
+            "priority": self.priority,
+            "user_id": self.user_id,
+            "category_id": self.category_id,
+            "created_at": str(self.created_at),
+            "updated_at": str(self.updated_at),
+            "due_date": str(self.due_date) if self.due_date else None,
+            "tags": self.tags.split(",") if self.tags else [],
+        }
 
     def validate_status(self, new_status):
-        valid = ['pending', 'in_progress', 'done', 'cancelled']
-        if new_status in valid:
-            return True
-        else:
-            return False
+        return new_status in VALID_STATUSES
 
-    def validate_priority(self, p):
-        if p >= 1 and p <= 5:
-            return True
-        return False
+    def validate_priority(self, priority):
+        return isinstance(priority, int) and not isinstance(priority, bool) and MIN_PRIORITY <= priority <= MAX_PRIORITY
 
     def is_overdue(self):
-        if not self.due_date or self.due_date >= utc_now():
+        if not self.due_date:
             return False
-        return self.status not in ("done", "cancelled")
+        return normalize_utc(self.due_date) < utc_now() and self.status not in ("done", "cancelled")

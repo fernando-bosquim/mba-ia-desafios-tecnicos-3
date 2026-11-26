@@ -1,10 +1,9 @@
 function errorHandler(err, req, res, next) {
     console.error(err);
     if (res.headersSent) {
-        next(err);
-        return;
+        return next(err);
     }
-    res.status(500).json({ error: "Erro interno" });
+    return res.status(500).json({ error: 'Erro interno' });
 }
 
 module.exports = { errorHandler };

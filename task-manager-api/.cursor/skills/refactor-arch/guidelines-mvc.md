@@ -21,7 +21,7 @@ Dependência permitida: view → controller → model, e controller → config. 
 Escolha um antes de criar pasta.
 
 1. **Greenfield.** Use quando HTTP, SQL e regra estão nos mesmos arquivos e não existe pacote de domínio. Crie a árvore alvo. O entry point antigo vira composition root fino.
-2. **Evolutivo.** Use quando `models/` e `routes/` (ou `services/`) já existem. Acrescente `controllers/`, `config/` e `middlewares/`. A rota fica com o decorator e uma chamada. O model permanece a fonte dos dados. Não reescreva ORM em SQL cru. Não mova arquivo de lugar só para espelhar o desenho do outro projeto.
+2. **Evolutivo.** Use quando `models/` e `routes/` (ou `services/`) já existem. Acrescente `controllers/`, `config/` e `middlewares/`. A rota fica com o decorator e uma chamada. O model permanece a fonte dos dados. Não reescreva ORM em SQL cru. Preserve a organização já existente que respeita responsabilidades; não mova arquivos apenas por estética.
 3. **Correção.** Use quando a separação já é MVC e os findings são locais (segredo, API obsoleta, N+1). Corrija no lugar. Não crie camada para ficar igual ao diagrama.
 
 Projeto com dois estilos de arquivo (parte em `src/`, parte na raiz) segue o estilo da maioria do código.

@@ -33,14 +33,14 @@ Cada finding precisa de: id do catálogo, severidade, arquivo, linhas, descriç�
 
 - Severidade: CRITICAL
 - Sinais: o mesmo arquivo acumula duas ou mais destas responsabilidades para mais de uma entidade: SQL ou DDL, regra de negócio (preço, estoque, status, pagamento), borda HTTP, segredo, notificação. Vale para `class` e para módulo de funções soltas. Sinal forte: um arquivo "manager", "utils" ou `models.py` único cobrindo o domínio inteiro.
-- Não é finding: model com método que só olha os próprios campos (`is_overdue` da entidade). Rota que só registra URL. Arquivo grande que faz uma coisa só.
+- Não é finding: model com método que só olha os próprios atributos da entidade (ex.: checar expiração ou status). Rota que só registra URL. Arquivo grande que faz uma coisa só.
 - Impacto: não dá para testar um domínio sem subir o resto; qualquer mudança atravessa o arquivo.
 - Correção: PB-03.
 
 ## AP-04 — Senha reversível ou hash obsoleto
 
 - Severidade: CRITICAL se a senha é texto puro, MD5, SHA1, ou hash caseiro. HIGH se o hash moderno existe mas o hash ou a senha volta no JSON.
-- Sinais: coluna `senha` / `password` / `pass` gravada com o valor recebido; `hashlib.md5` ou `hashlib.sha1` em senha; loop que "embaralha" base64 ou substring e chama isso de hash; `to_dict` ou resposta de login com o campo de senha.
+- Sinais: coluna de senha gravada em texto puro; `hashlib.md5` ou `hashlib.sha1` aplicados a senha; algoritmo caseiro ou ofuscação simples (como base64, XOR ou concatenação em laço) usada no lugar de hash criptográfico; serialização ou resposta de login contendo o campo de senha ou hash.
 - Não é finding: `generate_password_hash`, bcrypt, scrypt, argon2, PBKDF2, quando o digest não é serializado na resposta.
 - Impacto: vazamento do banco revela a senha; MD5 e SHA1 não servem para senha.
 - Correção: PB-07.
@@ -56,7 +56,7 @@ Cada finding precisa de: id do catálogo, severidade, arquivo, linhas, descriç�
 ## AP-06 — Estado global mutável
 
 - Severidade: HIGH
-- Sinais: `global` de conexão, cache ou contador; `let cache = {}` exportado e mutado; conexão criada uma vez com `check_same_thread=False`; objeto de domínio instanciado no import e reutilizado entre requests com campos que mudam; `create_all()` ou `initDb()` no import do módulo, não na função de boot.
+- Sinais: `global` de conexão, cache ou contador; objeto mutável de cache ou acumulador exportado em módulo e alterado por requisições; conexão criada uma vez com `check_same_thread=False`; objeto de domínio instanciado no import e reutilizado entre requests com campos mutáveis; inicialização de schema/banco executada no import do módulo em vez da função de boot.
 - Não é finding: constante imutável; pool criado no boot e injetado; cache local da função.
 - Impacto: requests se cruzam, teste vaza estado, thread do SQLite quebra fora do thread criador.
 - Correção: PB-06.
@@ -72,7 +72,7 @@ Cada finding precisa de: id do catálogo, severidade, arquivo, linhas, descriç�
 ## AP-08 — N+1 e consulta dentro de laço
 
 - Severidade: MEDIUM
-- Sinais: `query`, `SELECT`, `.get(`, `.filter`, `db.get` ou `db.all` dentro de `for`, `forEach` ou `.map` sobre linhas que acabaram de ser lidas. Contador manual de callbacks (`pending--`) para saber quando a resposta pode ser enviada.
+- Sinais: `query`, `SELECT`, `.get(`, `.filter`, `db.get` ou `db.all` dentro de `for`, `forEach` ou `.map` sobre registros recém-lidos, ou acesso a relação lazy dentro de laço. Controle manual de concorrência em callbacks aninhados (contadores decrescentes para decidir quando enviar a resposta).
 - Não é finding: join ou `IN (...)` único; eager load; laço que só monta dicionário em memória.
 - Impacto: tempo cresce com o número de pais × filhos; em callback, a resposta pode sair duplicada ou nunca sair.
 - Correção: PB-05.
@@ -116,7 +116,7 @@ Cada finding precisa de: id do catálogo, severidade, arquivo, linhas, descriç�
 ## AP-12 — Legibilidade
 
 - Severidade: LOW
-- Sinais: número mágico de regra (alíquota, limite, tamanho mínimo) repetido longe de uma constante; variável de uma letra para campo de negócio (`u`, `e`, `p`, `cc`); import não usado; função de helper nunca chamada; `print`/`console.log` de debug no fluxo feliz; `type(x) == list` em vez de `isinstance`.
+- Sinais: número mágico de regra (alíquota, limite, tamanho mínimo) repetido longe de uma constante; identificadores crípticos ou de uma letra para campos de domínio (ex.: `a`, `b`, `x`, `tmp`); import não usado; função utilitária nunca chamada; `print`/`console.log` de debug no fluxo feliz; checagens de tipo frágeis em vez do idioma da linguagem (ex.: comparação direta de classe em vez de `isinstance` ou `Array.isArray`).
 - Não é finding: índice de laço `i`; constante já nomeada; log estruturado de boot.
 - Impacto: leitura lenta, não quebra o desenho.
 - Correção: PB-11.

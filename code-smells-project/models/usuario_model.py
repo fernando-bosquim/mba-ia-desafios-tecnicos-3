@@ -1,8 +1,8 @@
 from werkzeug.security import check_password_hash, generate_password_hash
+from models.database import get_db
 
-from database import get_db
 
-def _publico(row):
+def _row_to_dict(row):
     return {
         "id": row["id"],
         "nome": row["nome"],
@@ -11,43 +11,62 @@ def _publico(row):
         "criado_em": row["criado_em"],
     }
 
-def listar():
-    rows = get_db().execute("SELECT * FROM usuarios").fetchall()
-    return [_publico(row) for row in rows]
+
+def _verificar_senha(senha_armazenada, senha_informada):
+    if not senha_armazenada:
+        return False, False
+    if ":" in senha_armazenada:
+        try:
+            if check_password_hash(senha_armazenada, senha_informada):
+                return True, False
+        except ValueError:
+            pass
+    if senha_armazenada == senha_informada:
+        return True, True
+    return False, False
+
+
+def listar_todos():
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("SELECT id, nome, email, tipo, criado_em FROM usuarios")
+    return [_row_to_dict(row) for row in cursor.fetchall()]
+
 
 def buscar_por_id(usuario_id):
-    row = get_db().execute("SELECT * FROM usuarios WHERE id = ?", (usuario_id,)).fetchone()
-    if row is None:
-        return None
-    return _publico(row)
-
-def criar(nome, email, senha, tipo="cliente"):
-    cursor = get_db().execute(
-        "INSERT INTO usuarios (nome, email, senha, tipo) VALUES (?, ?, ?, ?)",
-        (nome, email, generate_password_hash(senha), tipo),
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute(
+        "SELECT id, nome, email, tipo, criado_em FROM usuarios WHERE id = ?",
+        (usuario_id,),
     )
-    get_db().commit()
-    return cursor.lastrowid
+    row = cursor.fetchone()
+    return _row_to_dict(row) if row else None
+
 
 def autenticar(email, senha):
-    row = get_db().execute("SELECT * FROM usuarios WHERE email = ?", (email,)).fetchone()
-    if row is None:
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute(
+        "SELECT id, nome, email, senha, tipo FROM usuarios WHERE email = ?",
+        (email,),
+    )
+    row = cursor.fetchone()
+    if not row:
         return None
-    armazenada = row["senha"]
-    confere = False
-    try:
-        confere = check_password_hash(armazenada, senha)
-    except (TypeError, ValueError):
-        confere = False
-    if not confere and armazenada == senha:
-        get_db().execute(
+
+    valida, precisa_upgrade = _verificar_senha(row["senha"], senha)
+    if not valida:
+        return None
+
+    if precisa_upgrade:
+        novo_hash = generate_password_hash(senha)
+        cursor.execute(
             "UPDATE usuarios SET senha = ? WHERE id = ?",
-            (generate_password_hash(senha), row["id"]),
+            (novo_hash, row["id"]),
         )
-        get_db().commit()
-        confere = True
-    if not confere:
-        return None
+        db.commit()
+
     return {
         "id": row["id"],
         "nome": row["nome"],
@@ -55,5 +74,14 @@ def autenticar(email, senha):
         "tipo": row["tipo"],
     }
 
-def contar():
-    return get_db().execute("SELECT COUNT(*) FROM usuarios").fetchone()[0]
+
+def criar(nome, email, senha, tipo="cliente"):
+    db = get_db()
+    cursor = db.cursor()
+    senha_hash = generate_password_hash(senha)
+    cursor.execute(
+        "INSERT INTO usuarios (nome, email, senha, tipo) VALUES (?, ?, ?, ?)",
+        (nome, email, senha_hash, tipo),
+    )
+    db.commit()
+    return cursor.lastrowid

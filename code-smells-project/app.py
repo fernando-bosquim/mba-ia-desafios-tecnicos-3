@@ -1,28 +1,31 @@
+import logging
 from flask import Flask
 from flask_cors import CORS
+from config import settings
+from middlewares.error_handler import register_error_handlers
+from models.database import close_db, init_db
+from views.routes import api_bp
 
-from config.settings import DEBUG, HOST, PORT, SECRET_KEY
-from database import close_db, init_db
-from middlewares.error_handler import register_error_handler
-from views.routes import bp
 
 def create_app():
+    logging.basicConfig(level=logging.INFO)
     application = Flask(__name__)
-    application.config["SECRET_KEY"] = SECRET_KEY
-    application.config["DEBUG"] = DEBUG
+    application.config["SECRET_KEY"] = settings.SECRET_KEY
+    application.config["DEBUG"] = settings.DEBUG
+    application.config["DATABASE_PATH"] = settings.DATABASE_PATH
+    application.config["TOKEN_MAX_AGE"] = settings.TOKEN_MAX_AGE
+
     CORS(application)
     application.teardown_appcontext(close_db)
-    register_error_handler(application)
-    application.register_blueprint(bp)
+    register_error_handlers(application)
+    application.register_blueprint(api_bp)
     return application
+
 
 app = create_app()
 
+
 if __name__ == "__main__":
-    with app.app_context():
-        init_db()
-    print("=" * 50)
-    print("SERVIDOR INICIADO")
-    print(f"Rodando em http://{HOST}:{PORT}")
-    print("=" * 50)
-    app.run(host=HOST, port=PORT, debug=DEBUG)
+    init_db(app.config["DATABASE_PATH"])
+    app.logger.info("Servidor iniciado em http://%s:%s", settings.HOST, settings.PORT)
+    app.run(host=settings.HOST, port=settings.PORT, debug=settings.DEBUG)

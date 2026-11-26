@@ -1,26 +1,62 @@
-const express = require("express");
-const { config } = require("./config/settings");
-const { openDatabase, initDatabase } = require("./models/db");
-const { createRouter } = require("./views/routes");
-const { errorHandler } = require("./middlewares/errorHandler");
+const express = require('express');
+const { config } = require('./config/settings');
+const { createDatabase, initDb } = require('./models/db');
+const { createUserRepository } = require('./models/userRepository');
+const { createCourseRepository } = require('./models/courseRepository');
+const { createEnrollmentRepository } = require('./models/enrollmentRepository');
+const { createPaymentRepository } = require('./models/paymentRepository');
+const { createAuditLogRepository } = require('./models/auditLogRepository');
+const { createReportRepository } = require('./models/reportRepository');
+const { createCheckoutController } = require('./controllers/checkoutController');
+const { createReportController } = require('./controllers/reportController');
+const { createUserController } = require('./controllers/userController');
+const { createRoutes } = require('./views/routes');
+const { errorHandler } = require('./middlewares/errorHandler');
 
-async function main() {
+async function createApp() {
     const app = express();
     app.use(express.json());
 
-    const db = openDatabase();
-    await initDatabase(db);
-    const cache = new Map();
+    const db = createDatabase(config.dbPath);
+    await initDb(db);
 
-    app.use(createRouter(db, cache));
+    const checkoutCache = new Map();
+
+    const userRepository = createUserRepository(db);
+    const courseRepository = createCourseRepository(db);
+    const enrollmentRepository = createEnrollmentRepository(db);
+    const paymentRepository = createPaymentRepository(db);
+    const auditLogRepository = createAuditLogRepository(db);
+    const reportRepository = createReportRepository(db);
+
+    const checkoutController = createCheckoutController({
+        courseRepository,
+        userRepository,
+        enrollmentRepository,
+        paymentRepository,
+        auditLogRepository,
+        checkoutCache
+    });
+    const reportController = createReportController({ reportRepository });
+    const userController = createUserController({ userRepository });
+
+    app.use(createRoutes({ checkoutController, reportController, userController }));
     app.use(errorHandler);
 
-    app.listen(config.port, () => {
-        console.log(`Frankenstein LMS rodando na porta ${config.port}...`);
-    });
+    return { app, db };
 }
 
-main().catch((err) => {
-    console.error(err);
-    process.exit(1);
-});
+if (require.main === module) {
+    createApp()
+        .then(({ app }) => {
+            app.listen(config.port, () => {
+                console.log(`LMS API rodando em http://${config.host}:${config.port}...`);
+            });
+        })
+        .catch((err) => {
+            console.error('Falha ao iniciar a aplicação:', err);
+            process.exit(1);
+        });
+}
+
+module.exports = { createApp };

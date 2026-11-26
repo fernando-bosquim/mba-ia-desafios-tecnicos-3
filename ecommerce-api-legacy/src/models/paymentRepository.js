@@ -1,12 +1,12 @@
-const { run } = require("./db");
-
-async function createPayment(db, { enrollmentId, amount, status }) {
-    const result = await run(
-        db,
-        "INSERT INTO payments (enrollment_id, amount, status) VALUES (?, ?, ?)",
-        [enrollmentId, amount, status],
-    );
-    return result.lastID;
+function createPaymentRepository(db) {
+    return {
+        create(enrollmentId, amount, status) {
+            return db.run(
+                'INSERT INTO payments (enrollment_id, amount, status) VALUES (?, ?, ?)',
+                [enrollmentId, amount, status]
+            );
+        }
+    };
 }
 
-module.exports = { createPayment };
+module.exports = { createPaymentRepository };

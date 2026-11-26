@@ -1,111 +1,99 @@
-from database import get_db
+from models.database import get_db
 
 
-def _agrupar(rows):
-    pedidos = []
-    indice = {}
-    for row in rows:
-        pedido_id = row["id"]
-        if pedido_id not in indice:
-            pedido = {
-                "id": pedido_id,
-                "usuario_id": row["usuario_id"],
-                "status": row["status"],
-                "total": row["total"],
-                "criado_em": row["criado_em"],
-                "itens": [],
-            }
-            indice[pedido_id] = pedido
-            pedidos.append(pedido)
-        if row["item_id"] is None:
-            continue
-        nome = row["produto_nome"] if row["produto_nome"] else "Desconhecido"
-        indice[pedido_id]["itens"].append({
-            "produto_id": row["produto_id"],
-            "produto_nome": nome,
-            "quantidade": row["quantidade"],
-            "preco_unitario": row["preco_unitario"],
-        })
-    return pedidos
+def _hidratar_pedidos(rows_pedidos):
+    if not rows_pedidos:
+        return []
 
+    pedidos_por_id = {}
+    pedido_ids = []
+    for row in rows_pedidos:
+        pedido = {
+            "id": row["id"],
+            "usuario_id": row["usuario_id"],
+            "status": row["status"],
+            "total": row["total"],
+            "criado_em": row["criado_em"],
+            "itens": [],
+        }
+        pedidos_por_id[row["id"]] = pedido
+        pedido_ids.append(row["id"])
 
-def _consultar(where="", params=()):
-    query = """
+    placeholders = ",".join("?" * len(pedido_ids))
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute(
+        f"""
         SELECT
-            p.id, p.usuario_id, p.status, p.total, p.criado_em,
-            i.id AS item_id, i.produto_id, i.quantidade, i.preco_unitario,
-            pr.nome AS produto_nome
-        FROM pedidos p
-        LEFT JOIN itens_pedido i ON i.pedido_id = p.id
-        LEFT JOIN produtos pr ON pr.id = i.produto_id
-    """
-    if where:
-        query += " WHERE " + where
-    query += " ORDER BY p.id, i.id"
-    return _agrupar(get_db().execute(query, params).fetchall())
+            ip.pedido_id,
+            ip.produto_id,
+            ip.quantidade,
+            ip.preco_unitario,
+            p.nome AS produto_nome
+        FROM itens_pedido ip
+        LEFT JOIN produtos p ON p.id = ip.produto_id
+        WHERE ip.pedido_id IN ({placeholders})
+        """,
+        tuple(pedido_ids),
+    )
+
+    for item in cursor.fetchall():
+        pedidos_por_id[item["pedido_id"]]["itens"].append({
+            "produto_id": item["produto_id"],
+            "produto_nome": item["produto_nome"] if item["produto_nome"] else "Desconhecido",
+            "quantidade": item["quantidade"],
+            "preco_unitario": item["preco_unitario"],
+        })
+
+    return [pedidos_por_id[pid] for pid in pedido_ids]
+
+
+def inserir(usuario_id, total, itens_resolvidos):
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute(
+        "INSERT INTO pedidos (usuario_id, status, total) VALUES (?, 'pendente', ?)",
+        (usuario_id, total),
+    )
+    pedido_id = cursor.lastrowid
+
+    for item in itens_resolvidos:
+        cursor.execute(
+            """
+            INSERT INTO itens_pedido (pedido_id, produto_id, quantidade, preco_unitario)
+            VALUES (?, ?, ?, ?)
+            """,
+            (pedido_id, item["produto_id"], item["quantidade"], item["preco_unitario"]),
+        )
+        cursor.execute(
+            "UPDATE produtos SET estoque = estoque - ? WHERE id = ?",
+            (item["quantidade"], item["produto_id"]),
+        )
+
+    db.commit()
+    return pedido_id
 
 
 def listar_por_usuario(usuario_id):
-    return _consultar("p.usuario_id = ?", (usuario_id,))
-
-
-def listar():
-    return _consultar()
-
-
-def criar(usuario_id, total, itens_preparados):
-    """Persiste pedido, itens e baixa de estoque em transação única."""
     db = get_db()
-    try:
-        cursor = db.execute(
-            "INSERT INTO pedidos (usuario_id, status, total) VALUES (?, 'pendente', ?)",
-            (usuario_id, total),
-        )
-        pedido_id = cursor.lastrowid
-        for item in itens_preparados:
-            db.execute(
-                """
-                INSERT INTO itens_pedido (pedido_id, produto_id, quantidade, preco_unitario)
-                VALUES (?, ?, ?, ?)
-                """,
-                (pedido_id, item["produto_id"], item["quantidade"], item["preco_unitario"]),
-            )
-            db.execute(
-                "UPDATE produtos SET estoque = estoque - ? WHERE id = ?",
-                (item["quantidade"], item["produto_id"]),
-            )
-        db.commit()
-        return pedido_id
-    except Exception:
-        db.rollback()
-        raise
+    cursor = db.cursor()
+    cursor.execute("SELECT * FROM pedidos WHERE usuario_id = ?", (usuario_id,))
+    return _hidratar_pedidos(cursor.fetchall())
+
+
+def listar_todos():
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("SELECT * FROM pedidos")
+    return _hidratar_pedidos(cursor.fetchall())
 
 
 def atualizar_status(pedido_id, novo_status):
-    get_db().execute(
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute(
         "UPDATE pedidos SET status = ? WHERE id = ?",
         (novo_status, pedido_id),
     )
-    get_db().commit()
+    db.commit()
     return True
-
-
-def obter_metricas_vendas():
-    """Retorna totais e contagens agregadas de pedidos sem regra de negócio."""
-    db = get_db()
-    total_pedidos = db.execute("SELECT COUNT(*) FROM pedidos").fetchone()[0]
-    faturamento = db.execute("SELECT SUM(total) FROM pedidos").fetchone()[0] or 0
-    pendentes = db.execute("SELECT COUNT(*) FROM pedidos WHERE status = 'pendente'").fetchone()[0]
-    aprovados = db.execute("SELECT COUNT(*) FROM pedidos WHERE status = 'aprovado'").fetchone()[0]
-    cancelados = db.execute("SELECT COUNT(*) FROM pedidos WHERE status = 'cancelado'").fetchone()[0]
-    return {
-        "total_pedidos": total_pedidos,
-        "faturamento": faturamento,
-        "pendentes": pendentes,
-        "aprovados": aprovados,
-        "cancelados": cancelados,
-    }
-
-
-def contar():
-    return get_db().execute("SELECT COUNT(*) FROM pedidos").fetchone()[0]

@@ -1,61 +1,58 @@
 from functools import wraps
-
-from flask import g, jsonify, request
+from flask import current_app, g, jsonify, request
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
-from config.settings import SECRET_KEY, TOKEN_MAX_AGE
+_AUTH_SALT = "loja-api-auth"
 
-_serializer = URLSafeTimedSerializer(SECRET_KEY, salt="loja-auth")
+
+def _get_serializer():
+    secret = current_app.config["SECRET_KEY"]
+    return URLSafeTimedSerializer(secret, salt=_AUTH_SALT)
 
 
 def gerar_token(usuario):
-    """Emite token assinado para o usuário autenticado."""
-    return _serializer.dumps({
+    serializer = _get_serializer()
+    return serializer.dumps({
         "id": usuario["id"],
         "email": usuario["email"],
         "tipo": usuario["tipo"],
     })
 
 
-def validar_token(token):
-    """Valida a assinatura e expiração do token; retorna payload ou None."""
-    try:
-        return _serializer.loads(token, max_age=TOKEN_MAX_AGE)
-    except (BadSignature, SignatureExpired):
-        return None
-
-
-def _extrair_bearer():
+def extrair_usuario_opcional():
     header = request.headers.get("Authorization", "")
     if not header.startswith("Bearer "):
         return None
     token = header[7:].strip()
-    return token or None
+    if not token:
+        return None
+    max_age = current_app.config.get("TOKEN_MAX_AGE", 3600)
+    try:
+        return _get_serializer().loads(token, max_age=max_age)
+    except (BadSignature, SignatureExpired):
+        return None
 
 
-def require_auth(fn):
-    """Exige token Bearer válido no cabeçalho Authorization."""
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        token = _extrair_bearer()
-        payload = validar_token(token) if token else None
-        if not payload:
-            return jsonify({"erro": "Autenticação obrigatória"}), 401
-        g.current_user = payload
-        return fn(*args, **kwargs)
-    return wrapper
+def require_roles(*roles):
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            header = request.headers.get("Authorization", "")
+            if not header.startswith("Bearer "):
+                return jsonify({"erro": "Autenticação obrigatória"}), 401
+            token = header[7:].strip()
+            max_age = current_app.config.get("TOKEN_MAX_AGE", 3600)
+            try:
+                payload = _get_serializer().loads(token, max_age=max_age)
+            except (BadSignature, SignatureExpired):
+                return jsonify({"erro": "Token inválido ou expirado"}), 401
 
+            if roles and payload.get("tipo") not in roles:
+                return jsonify({"erro": "Permissão insuficiente"}), 403
 
-def require_admin(fn):
-    """Exige usuário autenticado com papel 'admin'."""
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        token = _extrair_bearer()
-        payload = validar_token(token) if token else None
-        if not payload:
-            return jsonify({"erro": "Autenticação obrigatória"}), 401
-        if payload.get("tipo") != "admin":
-            return jsonify({"erro": "Acesso restrito a administradores"}), 403
-        g.current_user = payload
-        return fn(*args, **kwargs)
-    return wrapper
+            g.current_user = payload
+            return fn(*args, **kwargs)
+
+        return wrapper
+
+    return decorator

@@ -1,10 +1,12 @@
-const config = {
-    port: Number(process.env.PORT || 3000),
-    dbUser: process.env.DB_USER || "dev-user",
-    dbPass: process.env.DB_PASS || "dev-only-change-me",
-    paymentGatewayKey: process.env.PAYMENT_GATEWAY_KEY || "dev-only-change-me",
-    smtpUser: process.env.SMTP_USER || "dev-smtp",
-    adminApiKey: process.env.ADMIN_API_KEY || "dev-admin-key-change-me",
-};
+const config = Object.freeze({
+    port: Number(process.env.PORT) || 3000,
+    host: process.env.HOST || 'localhost',
+    dbPath: process.env.DB_PATH || ':memory:',
+    dbUser: process.env.DB_USER || '',
+    dbPass: process.env.DB_PASS || '',
+    paymentGatewayKey: process.env.PAYMENT_GATEWAY_KEY || 'dev-only-payment-key',
+    smtpUser: process.env.SMTP_USER || '',
+    adminApiKey: process.env.ADMIN_API_KEY || 'dev-only-admin-key-change-me'
+});
 
 module.exports = { config };
